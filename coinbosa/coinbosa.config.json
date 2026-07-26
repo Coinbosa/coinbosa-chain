@@ -1,0 +1,81 @@
+{
+  "$comment": "Paramètres de référence de Coinbosa Chain. Toute valeur du réseau et du jeton est ici, jamais codée en dur dans les scripts.",
+  "network": {
+    "name": "Coinbosa Chain",
+    "chainId": 26262,
+    "consensus": "parlia",
+    "blockIntervalMs": 5000,
+    "epochLength": 200,
+    "gasLimit": "0x2625a00",
+    "evmVersion": "shanghai",
+    "$comment": "blockIntervalMs et epochLength ne sont PAS lus par le genesis. Ce sont des constantes Go du client : voir consensus/parlia/parlia.go. Ces valeurs documentent le client patché, elles ne le configurent pas."
+  },
+  "nativeCoin": {
+    "name": "Coinbosa",
+    "symbol": "BOSA",
+    "decimals": 18,
+    "totalSupply": "700000000",
+    "$comment": "Actif unique de Coinbosa Chain : paie le gas, sert d'enjeu au consensus. Les 18 décimales sont imposées par l'EVM (unité de base = wei) et ne sont pas modifiables. Offre fixée au genesis, aucune émission possible : le moteur de consensus ne crée pas de monnaie."
+  },
+  "rpc": {
+    "http": "http://127.0.0.1:8545",
+    "ws": "ws://127.0.0.1:8546",
+    "explorer": "http://127.0.0.1:8080"
+  },
+  "validators": {
+    "target": 12,
+    "current": 1,
+    "$comment": "Le livre blanc prévoit 12 validateurs identifiés répartis sur des serveurs distincts. La liste vit dans le contrat CoinbosaValidatorSet (0x...1000) et se met à jour par updateValidatorSet()."
+  },
+  "distribution": {
+    "$comment": "Répartition de l'allocation projet (700 000 000 BOSA). Pourcentages appliqués à projectAllocation, pas au total. Adresses dans genesis/distribution-addresses.json.",
+    "developpement": 20,
+    "technique": 10,
+    "recherche": 10,
+    "equipe": 10,
+    "fondsFinancierCard": 10,
+    "fondsLiquidite": 10,
+    "rechercheIA": 10,
+    "rechercheFinanceFintech": 5,
+    "securite": 3,
+    "audit": 2,
+    "evenementsFormation": 2,
+    "distributionPublique": 5,
+    "reserveStrategique": 3
+  },
+  "validatorRewards": {
+    "source": "frais de transaction uniquement",
+    "$comment": "Aucune part de l'offre n'est réservée aux récompenses et aucune émission n'est créée. Sans trafic, le revenu d'un validateur est nul. Ne jamais publier de taux de rendement."
+  },
+  "migration": {
+    "$comment": "Le projet contrôle la totalité des 500 M de jetons Solana (consolidés sur projectWallet). Il n'y a pas de détenteurs tiers : la réserve de migration est donc nulle et le projet reçoit l'intégralité de l'offre native. Les 500 M Solana seront retirés de la circulation (non migrés) pour éviter tout double compte. Le portail reste disponible pour un éventuel détenteur résiduel (ancien contributeur), crédité depuis la réserve stratégique.",
+    "sourceChain": "solana",
+    "sourceContract": "8UyvxCoVXoVaftWzp7j9yo2sGL2HnHTFDV4capenyFaf",
+    "sourceSupply": "500000000",
+    "projectHeld": "500000000",
+    "reserve": "0",
+    "ratio": "1:1",
+    "projectWallet": "5pdFbZdyab9jQUnC2E4x9XGmLpAFNqoF4GyjEtpfedQf"
+  },
+  "projectAllocation": {
+    "$comment": "Le projet contrôlant tout l'historique, l'allocation projet égale l'offre native. Pourcentages de distribution appliqués à ce total.",
+    "amount": "700000000"
+  },
+  "links": {
+    "$comment": "Liens publics — réseaux sociaux, site, explorateur, livre blanc. Source de vérité ; l'explorateur (explorer/index.html, objet LINKS) et le futur site coinbosa.com les reprennent.",
+    "website": "https://coinbosa.com",
+    "explorer": "https://explorer.coinbosa.com",
+    "whitepaper": "https://github.com/Coinbosa/coinbosa-chain/blob/master/coinbosa/WHITEPAPER.md",
+    "github": "https://github.com/Coinbosa/coinbosa-chain",
+    "facebook": "https://www.facebook.com/coinbosa",
+    "twitter": "",
+    "telegram": "https://t.me/coinbosa",
+    "telegramCommunity": "https://t.me/coinbosagroup",
+    "discord": ""
+  },
+  "entity": {
+    "name": "coinbosa, Inc.",
+    "jurisdiction": "Delaware, United States",
+    "copyright": "© 2022–2026 coinbosa, Inc."
+  }
+}
