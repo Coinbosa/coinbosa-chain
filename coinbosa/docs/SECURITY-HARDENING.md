@@ -19,7 +19,7 @@ il ne le remplace pas.
 | Sévérité | Problème | Correctif |
 |---|---|---|
 | **Haute** | **XSS stocké on-chain** dans l'explorateur : `name()` / `symbol()` d'un jeton, contrôlés par son déployeur, étaient injectés en `innerHTML` sans échappement. Un jeton dont `name()` vaut `<img src=x onerror=…>` exécutait du script chez tout visiteur ouvrant l'onglet Tokens. | Échappement HTML systématique (`esc()`) des valeurs issues de contrats, et plafonnement de leur longueur. |
-| **Moyenne** | **`updateValidatorSet` pouvait figer la chaîne** : remplacer le set par des adresses sans nœud vivant laissait le réseau sans signataire au bloc d'epoch suivant — arrêt irréversible, en une transaction. | Le contrat exige désormais que le `GOVERNOR` reste dans le set, et rejette les clés de vote en double. |
+| **Moyenne** | **`updateValidatorSet` pouvait figer la chaîne** : remplacer le set par des adresses sans nœud vivant laissait le réseau sans signataire au bloc d'epoch suivant — arrêt irréversible, en une transaction. | Le contrat exige que le **validateur de genèse** (`INITIAL_VALIDATOR`) reste dans le set, et rejette les clés de vote en double. **Cela ne garantit pas la liveness** : Parlia exige ⌊N/2⌋+1 signataires en ligne. La barrière opérable est `scripts/rotate-validators.js`. |
 | **Moyenne** | **Contrats inter-chaînes hérités** (pont, cross-chain, light client, relayers) conservaient leur bytecode ; seul le solde était purgé. | Leur code est retiré du genesis. Vérifié empiriquement : la chaîne démarre et franchit l'epoch sans eux. |
 | **Basse** | **Ports RPC divergents** (nœud sur 8595, explorateur sur 8545) : l'explorateur ne joignait jamais le nœud et basculait en silence sur des données de démonstration. | Port unifié sur 8545 partout. **Depuis, le repli sur des données de démonstration a été entièrement supprimé** : l'explorateur n'affiche plus que ce qui vient de la chaîne, et un avis explicite quand aucun nœud ne répond. L'accès passe par le relais same-origin `/rpc`. |
 | **Basse** | **Adresses de distribution en double** non détectées : deux postes partageant une adresse fusionnaient leurs soldes sans alerte. | `build-genesis.js` rejette tout doublon d'adresse. |
@@ -68,14 +68,11 @@ exposé au réseau. Aucune clé privée en clair sur le serveur.
 
 ### Séparation des rôles
 
-Aujourd'hui, une clé unique peut à la fois **sceller les blocs**, **gouverner la liste des
-validateurs** (`updateValidatorSet`) et **retirer les fonds** (`sweepSurplus`). C'est le risque
-numéro un du dossier. En production, ces rôles doivent être séparés :
+En développement, une même clé peut sceller et gouverner. **En production, ces rôles sont déjà séparés dans le genesis** (`INITIAL_VALIDATOR` ≠ `GOVERNOR`, voir `genesis-reference.json`). Ce qui reste à durcir :
 
-- **`GOVERNOR`** = un portefeuille **multi-signatures** (Safe) avec délai (timelock), distinct de
-  la clé de scellage et de la trésorerie.
-- **Clé de scellage** = par validateur, générée sur son serveur, jamais partagée.
-- **Trésorerie** = multi-signatures dédié.
+- **`GOVERNOR`** = un portefeuille **multi-signatures** (Safe) avec délai (timelock), distinct de la clé de scellage et de la trésorerie. Aujourd'hui c'est une adresse unique dérivée du matériel, **irremplaçable** (constante du contrat).
+- **Clé de scellage** = par validateur, générée sur son serveur, jamais partagée. Ne gouverne pas.
+- **Trésorerie** = les 13 postes de `distribution-addresses.json`, à passer sous multi-signatures.
 
 ### Le genesis de production
 
@@ -120,10 +117,13 @@ documentée (via la gouvernance, jamais par réécriture de l'historique git).
 
 Ces points relèvent du serveur et de l'exécution, pas d'un correctif de fichier :
 
-1. Séparer le `GOVERNOR`, la clé de scellage et la trésorerie sous multi-signatures et timelock.
-2. Sortir la clé de scellage du nœud RPC (signeur distant / HSM).
+1. Mettre le `GOVERNOR` et la trésorerie sous multi-signatures et timelock (la séparation d'adresses gouverneur / scellage est déjà en place).
+2. Sortir la clé de scellage du nœud (signeur distant / HSM) — aujourd'hui elle reste déverrouillée dans le processus validateur, isolé du RPC.
 3. Fermer le RPC (proxy TLS, origines explicites, `debug` retiré, limitation de débit).
-4. Passer à plusieurs validateurs indépendants.
+4. Passer à plusieurs validateurs indépendants — **sans** appeler `updateValidatorSet` à la main
+   (`rotate-validators.js` uniquement). `SlashIndicator` hérité est **incompatible** avec
+   `CoinbosaValidatorSet` (pas de `misdemeanor`/`felony`) : un slash revert silencieusement,
+   aucune sanction. C'est acceptable à N=1 ; bloquant dès N≥2.
 5. Anti-DoS : prix de gas minimal, bornes mempool.
 6. Marqueur d'identité réseau distinct.
 7. Supervision (hauteur de bloc, mempool, disque, accès RPC non autorisé) et plan d'incident.

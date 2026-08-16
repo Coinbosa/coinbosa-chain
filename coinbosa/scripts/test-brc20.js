@@ -105,6 +105,8 @@ async function expectRevert(name, promise) {
   check('transferFrom transfère bien', await token.balanceOf(bob.address), 200n * UNIT);
   check('transferFrom décrémente l’autorisation', await token.allowance(deployer.address, alice.address), 300n * UNIT);
   await expectRevert('transferFrom au-delà de l’autorisation rejeté', token.connect(alice).transferFrom(deployer.address, bob.address, 999n * UNIT));
+  await expectRevert('decreaseAllowance au-delà de l’autorisation rejeté', token.decreaseAllowance(alice.address, 999n * UNIT));
+  await expectRevert('approve vers l’adresse nulle rejeté', token.approve(ethers.ZeroAddress, 1n));
 
   await (await token.increaseAllowance(alice.address, 100n * UNIT)).wait();
   check('increaseAllowance augmente', await token.allowance(deployer.address, alice.address), 400n * UNIT);
@@ -122,6 +124,8 @@ async function expectRevert(name, promise) {
   await (await token.mint(alice.address, 50n * UNIT)).wait();
   check('mint augmente l’offre', await token.totalSupply(), before + 50n * UNIT);
   await expectRevert('mint par un non-propriétaire rejeté', token.connect(alice).mint(alice.address, 1n));
+  await expectRevert('mint vers l’adresse nulle rejeté', token.mint(ethers.ZeroAddress, 1n));
+  await expectRevert('burn au-delà du solde rejeté', token.connect(alice).burn(99999n * UNIT));
   const beforeBurn = await token.totalSupply();
   await (await token.connect(alice).burn(25n * UNIT)).wait();
   check('burn réduit l’offre', await token.totalSupply(), beforeBurn - 25n * UNIT);
@@ -131,6 +135,7 @@ async function expectRevert(name, promise) {
   // acceptOwnership() pour que le transfert prenne effet. Cela évite d'envoyer la
   // propriété à une adresse erronée ou dont on ne détient pas la clé.
   console.log('\nPROPRIÉTÉ (transfert en deux étapes)');
+  await expectRevert('transferOwnership vers l’adresse nulle rejeté', token.transferOwnership(ethers.ZeroAddress));
   await (await token.transferOwnership(alice.address)).wait();
   check('transferOwnership ne change pas le propriétaire immédiatement', await token.getOwner(), deployer.address);
   check('transferOwnership enregistre le propriétaire en attente', await token.pendingOwner(), alice.address);
@@ -162,6 +167,7 @@ async function expectRevert(name, promise) {
   await (await token.finishMinting()).wait();
   check('mintingFinished() vaut true après clôture', await token.mintingFinished(), true);
   await expectRevert('mint rejeté après clôture de l’émission', token.mint(deployer.address, 1n));
+  await expectRevert('finishMinting une seconde fois rejeté', token.finishMinting());
   check('l’offre ne bouge plus après clôture', await token.totalSupply(), supplyAtClose);
 
   // --- Abandon définitif de la propriété ---

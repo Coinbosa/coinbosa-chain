@@ -1,8 +1,14 @@
 // Vérifie que l'offre native inscrite au genesis vaut exactement l'offre attendue.
 //
-// Les soldes sont lus AU BLOC 0 (genesis) : cela reflète l'allocation initiale sans
-// être faussé par les frais brûlés/déposés après coup (EIP-1559), et compare le
-// genesis DÉPLOYÉ (on-chain) au fichier local, adresse par adresse.
+// Lecture préférée : AU BLOC 0. Cela reflète l'allocation initiale, sans être
+// faussé par les mouvements ultérieurs, et compare le genesis DÉPLOYÉ au fichier
+// local, adresse par adresse.
+//
+// Si l'état du bloc 0 a été purgé (nœud non-archive), on bascule au bloc courant.
+// Dans ce mode on NE compare PLUS les soldes poste par poste : les trésoreries
+// peuvent avoir bougé, et un écart n'est plus une preuve d'émission. L'allocation
+// initiale reste prouvée par le stateRoot (check-genesis-hash.js). Ici on vérifie
+// encore que le pont est vide et que les contrats inter-chaînes n'ont pas de code.
 //
 // Garanti : aucun solde hérité (le pont du réseau amont, notamment) ne subsiste,
 // la répartition boucle sur le total, les contrats inter-chaînes sont sans code.
@@ -68,6 +74,7 @@ const EXPECTED = BigInt(config.nativeCoin.totalSupply) * 10n ** 18n;
     if (onchain !== declared) mismatches.push({ addr, declared, onchain });
     total += onchain;
   }
+  const lectureGenesis = BLOC === 0;
 
   // le contrat de pont hérité doit être vide en solde ET purgé de son bytecode
   const bridge = await provider.getBalance('0x0000000000000000000000000000000000001004', BLOC);
@@ -78,19 +85,41 @@ const EXPECTED = BigInt(config.nativeCoin.totalSupply) * 10n ** 18n;
   for (const a of XCHAIN) { const c = await provider.getCode(a); if (c && c !== '0x') withCode.push(a); }
 
   const whole = (x) => (x / 10n ** 18n).toLocaleString('en-US');
-  console.log(`  offre native on-chain : ${whole(total)} BOSA`);
-  console.log(`  attendu               : ${whole(EXPECTED)} BOSA`);
+  console.log(`  lecture               : ${lectureGenesis ? 'bloc 0 (allocation initiale)' : 'bloc courant (état du bloc 0 purgé)'}`);
+  console.log(`  soldes des postes genesis : ${whole(total)} BOSA`);
+  console.log(`  attendu au genesis        : ${whole(EXPECTED)} BOSA`);
   console.log(`  pont 0x…1004          : ${whole(bridge)} BOSA`);
   console.log(`  contrats inter-chaînes avec code : ${withCode.length}`);
 
   let ok = true;
-  if (total !== EXPECTED) { console.error(`\nECHEC : offre de ${whole(total)}, attendu ${whole(EXPECTED)}.`); ok = false; }
   if (bridge !== 0n) { console.error(`\nECHEC : le pont hérité détient encore ${whole(bridge)} BOSA.`); ok = false; }
   if (withCode.length) { console.error(`\nECHEC : contrats inter-chaînes hérités encore présents (bytecode) : ${withCode.join(', ')}`); ok = false; }
-  if (mismatches.length) {
-    console.error('\nECHEC : soldes on-chain divergents du genesis :');
-    mismatches.forEach((m) => console.error(`  ${m.addr} : ${whole(m.onchain)} au lieu de ${whole(m.declared)}`));
-    ok = false;
+
+  if (lectureGenesis) {
+    // Au bloc 0, tout écart est une erreur d'allocation.
+    if (total !== EXPECTED) { console.error(`\nECHEC : offre de ${whole(total)}, attendu ${whole(EXPECTED)}.`); ok = false; }
+    if (mismatches.length) {
+      console.error('\nECHEC : soldes on-chain divergents du genesis :');
+      mismatches.forEach((m) => console.error(`  ${m.addr} : ${whole(m.onchain)} au lieu de ${whole(m.declared)}`));
+      ok = false;
+    }
+  } else {
+    // Bloc courant : les trésoreries PEUVENT avoir bougé. Un écart poste par poste
+    // n'est plus une preuve d'émission. L'allocation initiale est le stateRoot.
+    // En revanche, plus de 700 M sur les seules adresses du genesis serait une
+    // création de monnaie — ça, on le refuse encore.
+    if (total > EXPECTED) {
+      console.error(`\nECHEC : ${whole(total)} BOSA sur les adresses du genesis, plafond ${whole(EXPECTED)}.`);
+      ok = false;
+    }
+    if (mismatches.length) {
+      console.warn('\n  (info) soldes courants ≠ allocation du genesis — attendu après usage :');
+      mismatches.forEach((m) => console.warn(`    ${m.addr} : ${whole(m.onchain)} (était ${whole(m.declared)})`));
+    }
+    if (total !== EXPECTED && total <= EXPECTED) {
+      console.warn(`  (info) ${whole(total)} BOSA restant sur les postes du genesis ; le reste a quitté ces adresses.`);
+      console.warn('  l\'offre initiale est prouvée par check-genesis-hash.js, pas par cette somme.');
+    }
   }
   if (!ok) process.exit(1);
   console.log('\n  offre native conforme, contrats inter-chaînes purgés');

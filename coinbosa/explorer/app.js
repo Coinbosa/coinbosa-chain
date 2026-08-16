@@ -8,12 +8,9 @@ const I18N={
 };
 
 const SYS=[['0x0000000000000000000000000000000000001000','CoinbosaValidatorSet','consensus'],
-['0x0000000000000000000000000000000000001001','SlashIndicator','slashing'],
+['0x0000000000000000000000000000000000001001','SlashIndicator','slashing (héritage, incompatible — voir audit)'],
 ['0x0000000000000000000000000000000000001002','SystemReward','reward'],
-['0x0000000000000000000000000000000000001006','RelayerHub','relayer'],
-['0x0000000000000000000000000000000000001007','GovHub','governance'],
-['0x0000000000000000000000000000000000001008','TokenManager','tokens'],
-['0x0000000000000000000000000000000000002000','CrossChain','cross-chain']];
+['0x0000000000000000000000000000000000001007','GovHub','governance']];
 
 // Point d'accès RPC : TOUJOURS same-origin (/rpc). Le serveur web relaie /rpc vers le
 // nœud local ; le port 8545 reste fermé au pare-feu et la CSP peut rester stricte

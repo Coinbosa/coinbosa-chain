@@ -203,13 +203,13 @@ contract CoinbosaValidatorSet {
         uint256 n = newVals.length;
         require(n > 0 && n <= MAX_VALIDATORS, "bad length");
         require(newVotes.length == n, "length mismatch");
-        // Garde anti-arret : INITIAL_VALIDATOR doit rester dans le set. Sans cela, un
-        // appel qui remplace le set par des adresses dont aucune cle n'est detenue
-        // par un noeud mineur laisse le reseau sans signataire au prochain bloc
-        // d'epoch, et la chaine s'arrete irreversiblement. C'est le validateur de
-        // genese — et non le gouverneur — qui detient une cle de scellage : exiger sa
-        // presence garantit un signataire. Exiger celle du gouverneur ne garantirait
-        // rien, puisqu'il ne produit aucun bloc.
+        // Garde anti-arret PARTIELLE : INITIAL_VALIDATOR doit rester dans le set.
+        // C'est le validateur de genese — et non le gouverneur — qui detient une cle
+        // de scellage : l'exiger evite de retirer la seule adresse dont on sait qu'une
+        // cle existe. Cela NE GARANTIT PAS la liveness. Parlia exige ⌊N/2⌋+1
+        // signataires DISTINCTS et EN LIGNE : passer a N=2 avec un seul noeud arrete
+        // la chaine au prochain epoch. Le contrat ne peut pas le verifier. Ne jamais
+        // appeler cette fonction directement — passer par rotate-validators.js.
         bool sealerPresent = false;
         for (uint256 i = 0; i < n; ++i) {
             require(newVals[i] != address(0), "zero address");

@@ -109,6 +109,7 @@ contract BRC20 is IBRC20 {
     /// @notice Ferme DÉFINITIVEMENT l'émission : plus aucun mint n'est ensuite possible.
     /// Rend l'offre fixe et vérifiable — indispensable pour un jeton présenté comme tel.
     function finishMinting() public onlyOwner {
+        require(!_mintingFinished, "BRC20: emission deja close");
         _mintingFinished = true;
         emit MintingFinished();
     }
