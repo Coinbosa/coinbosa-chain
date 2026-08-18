@@ -49,22 +49,28 @@ franchit un bloc d'epoch. C'est utile, mais il faut savoir ce qu'elle **ne** dé
 Les scripts livrés (`start-node.sh`) sont marqués **DÉVELOPPEMENT LOCAL**. La production exige
 une configuration différente.
 
-### Les clés ne vivent pas dans le nœud
+### La clé de scellage est encore dans le processus validateur
 
 En développement, le nœud déverrouille la clé de scellage dans son propre processus
-(`--unlock`, `--allow-insecure-unlock`). **En production, c'est interdit.** La clé de scellage
-doit être détenue par un **signeur distant** (Clef, web3signer) ou un HSM/KMS, hors du processus
-exposé au réseau. Aucune clé privée en clair sur le serveur.
+(`--unlock`, `--allow-insecure-unlock`). **Les scripts de production font encore la même
+chose** (`deploy/40-validator.sh`). Ce n'est pas un oubli de drapeau : le validateur n'expose
+aucun HTTP, tourne sous un utilisateur dédié, et le RPC public vit sur un autre processus
+(`deploy/30-node.sh`, sans clé). Un signeur distant (Clef, web3signer) ou un HSM reste un
+objectif — pas l'état actuel. Suivre l'ancienne phrase « en production c'est interdit »
+sans avoir branché le signeur arrêterait la production de blocs.
 
-### Le RPC est fermé
+### Le RPC public est un relais, pas un geth ouvert
 
-| Réglage | Développement | Production |
+Ce que `deploy/30-node.sh` et `deploy/10-web.sh` font réellement :
+
+| Réglage | Ce que le script pose | Pourquoi pas « le domaine réel » |
 |---|---|---|
-| `--http.api` | `eth,net,web3,parlia` | idem — **jamais `debug`**, ni `txpool` si inutile |
-| `--http.corsdomain` | origine locale | liste explicite des origines autorisées |
-| `--http.vhosts` | `127.0.0.1,localhost` | le domaine réel, jamais `*` |
-| Exposition | `127.0.0.1` | derrière un reverse-proxy TLS, avec authentification et limitation de débit |
-| Méthodes admin | — | fermées |
+| `--http.api` | `eth,net` seulement | `web3_clientVersion` donnait la version exacte du client, recoupable avec `go-vuln-allowlist.json`. `parlia` / `debug` / `txpool` absents. |
+| `--http.addr` | `127.0.0.1` | 8545 n'est pas ouvert au monde ; Caddy relaie `/rpc` en POST uniquement. |
+| `--http.vhosts` | `localhost,127.0.0.1` | Caddy pose `Host` à `{upstream_hostport}`. Mettre le nom public ici casserait ce modèle, ou forcerait à relâcher la garde anti-DNS-rebinding. |
+| `--http.corsdomain` | `https://explorer.coinbosa.com` | Liste explicite, jamais `*`. |
+| `--nodiscover` | sur **les deux** nœuds | Condition des dérogations QUIC/WebTransport/DTLS. |
+| Lots RPC | `--rpc.batch-request-limit 50`, `--rangelimit`, `--rpc.logquerylimit 20` | Un lot de 1000 (défaut geth) contournait le limiteur HTTP. |
 
 ### Séparation des rôles
 
@@ -119,12 +125,12 @@ Ces points relèvent du serveur et de l'exécution, pas d'un correctif de fichie
 
 1. Mettre le `GOVERNOR` et la trésorerie sous multi-signatures et timelock (la séparation d'adresses gouverneur / scellage est déjà en place).
 2. Sortir la clé de scellage du nœud (signeur distant / HSM) — aujourd'hui elle reste déverrouillée dans le processus validateur, isolé du RPC.
-3. Fermer le RPC (proxy TLS, origines explicites, `debug` retiré, limitation de débit).
+3. ~~Fermer le RPC~~ **Fait dans les scripts** (`eth,net`, relais Caddy, lots bornés). Reste : confirmer que le serveur public a bien été redéployé avec ces scripts.
 4. Passer à plusieurs validateurs indépendants — **sans** appeler `updateValidatorSet` à la main
    (`rotate-validators.js` uniquement). `SlashIndicator` hérité est **incompatible** avec
    `CoinbosaValidatorSet` (pas de `misdemeanor`/`felony`) : un slash revert silencieusement,
    aucune sanction. C'est acceptable à N=1 ; bloquant dès N≥2.
-5. Anti-DoS : prix de gas minimal, bornes mempool.
+5. Anti-DoS : prix de gas minimal, bornes mempool. (`--rangelimit` et la limite de lots sont en place.)
 6. Marqueur d'identité réseau distinct.
-7. Supervision (hauteur de bloc, mempool, disque, accès RPC non autorisé) et plan d'incident.
+7. ~~Supervision~~ **Fait dans les scripts** (`deploy/50-monitoring.sh` : hauteur, fork, disque, TLS, lisibilité `eth_getLogs`). Reste : DSN Sentry réellement branché, et redéploiement de la sonde n°6.
 8. Audit de sécurité **externe** avant toute mise en valeur du réseau.

@@ -74,6 +74,27 @@ for (const bloc of blocs) {
 const allow = JSON.parse(fs.readFileSync(ALLOWLIST, 'utf8')).derogations || [];
 const byId = new Map(allow.map((d) => [d.avis, d]));
 
+// Les dérogations QUIC / WebTransport / DTLS ne valent QUE tant que la découverte
+// de pairs est fermée sur les deux nœuds. Un commentaire qui dit « --nodiscover »
+// ne compte pas : il faut le drapeau réellement passé à geth.
+(function verifierNodiscover() {
+  const fichiers = ['deploy/30-node.sh', 'deploy/40-validator.sh'];
+  const absents = [];
+  for (const rel of fichiers) {
+    const txt = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    const present = txt.split('\n').some((l) => /^\s*--nodiscover\b/.test(l));
+    if (!present) absents.push(rel);
+  }
+  if (absents.length) {
+    console.error('\nECHEC : --nodiscover n\'est plus un drapeau de démarrage dans :');
+    for (const f of absents) console.error(`    coinbosa/${f}`);
+    console.error('  Les dérogations QUIC/WebTransport/DTLS de go-vuln-allowlist.json');
+    console.error('  s\'appuient sur cette fermeture. Soit on remet le drapeau, soit on');
+    console.error('  remonte les dépendances — on ne déroge pas « à l\'aveugle ».');
+    process.exit(1);
+  }
+})();
+
 const inconnus = [], expirees = [], couvertes = [];
 for (const id of atteignables) {
   const d = byId.get(id);

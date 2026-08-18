@@ -1,9 +1,32 @@
-# Audit — zones d'ombre, 16 août 2026
+# Audit — zones d'ombre
 
-Passe adversarial sur le code **tel qu'il est** sur `coinbosa-genesis-bos20`
-(après 52 commits post-`master`). Chaque trouvaille a été relue contre le code
-et, pour le consensus, contre `parlia.go`. Ce document ne remplace pas un audit
-externe.
+Passe adversarial sur le code **tel qu'il est** sur `coinbosa-genesis-bos20`.
+Chaque trouvaille a été relue contre le code et, pour le consensus, contre
+`parlia.go`. Ce document ne remplace pas un audit externe.
+
+---
+
+## Passe 2 — 18 août 2026
+
+Relecture des commits arrivés depuis la passe 1 (`88fa75b75` … `f1664e8fd`) :
+explorateur à cartes, routage `/tx|/block|/address`, sonde `eth_getLogs`,
+scène 3D extraite, CI Go devenue rouge.
+
+| Sévérité | Zone d'ombre | Verdict |
+|---|---|---|
+| **CI rouge** | `GO-2026-6099` / CVE-2026-57497 (`webtransport-go` : `io.ReadAll` sur les capsules inconnues). 9ᵉ faille atteignable, absente de la liste de dérogation. C'est ce qui a fait échouer « Go vulnérabilités » sur `coinbosa-genesis-bos20` (run 32189123157). | Dérogation **datée** (expire 2026-10-06), même justification que 4488/4485/4483 : `--nodiscover` sur les deux nœuds. Remontée à v0.11.1 = changement du binaire de scellage, à planifier. `audit-go.js` refuse désormais de déroger si `--nodiscover` disparaît d'un script de déploiement. |
+| **Mineur (ops)** | La sonde n°6 interpolait `hex_h` (sortie RPC) dans un JSON bash. Un résultat du genre `0x1$(cmd)` s'exécuterait — nœud compromis ou relais cassé. | Rejet si ce n'est pas `^0x[hex]+$`. |
+| **Mineur (UX / honnêteté)** | Une transaction **en attente** (pas de reçu) s'affichait **échouée**. C'est le lien que MetaMask ouvre pendant ~5 s. | Badge « en attente », pas de n° de bloc inventé. |
+| **Docs** | `SECURITY-HARDENING.md` disait encore « en production, `--unlock` est interdit » et conseillait `--http.vhosts` = le domaine public. Les scripts font l'inverse (clé dans le processus validateur ; Caddy pose `Host` localhost). | Texte aligné sur `30-node.sh` / `40-validator.sh`. |
+| **Docs** | La dérogation DTLS affirmait `--maxpeers 0` sur le validateur. Faux : ce drapeau empêcherait l'appairage avec le nœud RPC. Le validateur a `--nodiscover` + `--netrestrict 127.0.0.0/8`. | Justification rectifiée. |
+
+**Vérifié, pas un bug (passe 2) :** cartes explorateur via `esc()` / `hx()` / `adrl()` ; CSP `script-src 'self'` ; `scene.js` sans `eval` / `innerHTML` / `document.write` ; `rotate-validators.js` garde encore la simulation obligatoire + l'avertissement 1→3 ; commentaires ValidatorSet seulement.
+
+**Toujours vrai, inchangé :** gouverneur irremplaçable, validateur de genèse inamovible, SlashIndicator mort, N=1 = réorg triviale, frais non brûlés. PR #3 (Go 1.25.13) est **fusionnée**.
+
+---
+
+## Passe 1 — 16 août 2026
 
 **36 contrôles ciblés → 11 confirmés → 8 corrigés ici, 3 consignés comme limites
 figées (bytecode du bloc 0).**
@@ -81,10 +104,9 @@ Inchangé. À dire publiquement tant que N=1.
 
 ## Hors correctif de fichier (déjà connu, toujours vrai)
 
-- **Go 1.25.12** : 7 failles atteignables de la bibliothèque standard. Correctif déjà
-  ouvert : PR #3 (`toolchain go1.25.13`). Ne pas improviser le redéploiement du
-  validateur.
-- Dérogations `go-vuln-allowlist.json` : expirent le **2026-10-06**.
+- **Go 1.25.13** est l'outil de compilation (PR #3 fusionnée). Les dérogations
+  `go-vuln-allowlist.json` — y compris `GO-2026-6099` ajouté le 18 août —
+  expirent le **2026-10-06**.
 - Pas de signeur distant / HSM : la clé de scellage est déverrouillée dans le
   processus validateur (isolé du RPC, utilisateur dédié).
 - Pas d'audit **externe**.
