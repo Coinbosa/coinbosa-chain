@@ -11,6 +11,8 @@ retenue. **36 trouvailles brutes → 19 confirmées → correctifs ci-dessous.**
 
 > Cet audit est une auto-évaluation. Il **ne remplace pas** un audit de sécurité externe,
 > qui reste requis avant toute mise en valeur du réseau (voir [SECURITY-HARDENING.md](SECURITY-HARDENING.md)).
+> Passe du 16 août 2026 (zones d'ombre, slash hérité, docs périmées) :
+> [AUDIT-ZONES-OMBRE.md](AUDIT-ZONES-OMBRE.md).
 
 ---
 
@@ -29,7 +31,7 @@ retenue. **36 trouvailles brutes → 19 confirmées → correctifs ci-dessous.**
 |---|---|---|
 | **Majeur** | `build-genesis.js` : le `GOVERNOR` était injecté par `String.replace` **sans vérifier** le remplacement → si le motif changeait, le contrat compilait silencieusement avec le gouverneur par défaut `0x…0001`. | Garde dure : échec si le motif n'est pas trouvé/remplacé. Adresse **checksummée EIP-55**. |
 | **Majeur** | Le genesis de **développement** (adresses synthétiques + validateur crédité) s'écrivait au **même chemin** que la prod, sans marqueur. | Chemin distinct (`genesis-coinbosa-dev.json`) + marqueur `coinbosaDev`. `check-supply.js` **refuse** un genesis marqué dev. |
-| **Majeur** | `check-supply.js` lisait les soldes à `latest` — or la **base fee brûlée** (EIP-1559) fait diminuer l'offre après le genesis → **faux échec** sur une chaîne saine. | Soldes lus **au bloc 0** (genesis) : reflète l'allocation initiale, stable, et compare le genesis déployé au fichier local, adresse par adresse. |
+| **Majeur** | `check-supply.js` lisait les soldes à `latest` — or les mouvements après le genesis (transferts, frais) faussent la comparaison poste par poste. Puis l'état du bloc 0 est **purgé** sur un nœud non-archive, ce qui force un repli. | Lecture au **bloc 0** quand l'état existe ; si purgé, repli au bloc courant **sans** traiter un écart poste par poste comme une émission (l'allocation initiale est le stateRoot). |
 | Mineur | `check-blocktime.js` : boucle d'attente **sans borne** (boucle infinie si la chaîne est figée). | Borne d'arrêt : échec si trop peu de blocs après un délai. |
 | Mineur | `genesis-base.json` : adresse validateur réelle `0x9822…` figée dans l'extraData du gabarit. | Mise à **zéro** (l'extraData est de toute façon réécrit par `build-genesis.js`). |
 | Mineur | `coinbosa.config.json` : commentaire de répartition « 650 M » (faux, c'est 700 M) ; `projectHeld` à 450 M (le projet détient toute l'offre Solana de 500 M) ; chiffres « ~180 M » non vérifiés. | Alignés : 700 M, 500 M, chiffres non vérifiés retirés des commentaires. |
@@ -84,10 +86,9 @@ confirmés. Défauts additionnels corrigés :
 | Reco | Lien livre blanc du site divulguait le dépôt GitHub. | Pointe vers `https://coinbosa.com/whitepaper/` (hébergé). |
 | Mineur | Cosmétique/robustesse : garde de schéma du lien explorateur (nav), echo `:8595`→`:8545`, commentaire `coinbosaDev`, `sshd -T` sous `set -e`, IP opérateur fail2ban via `sudo`. | Corrigés. |
 
-**Reste (opérationnel, non-code) :** remplir `distribution-addresses.json` avec de vraies adresses
-multi-signatures générées **sur le serveur cible** (déjà gardé : `build-genesis.js` refuse la prod sinon).
-**Post-lancement acceptable :** en-tête CSP Caddy (à ajouter après vérification du rendu en ligne),
-`Ownable2Step` + plafond de mint pour les **contrats de jeton BRC20** applicatifs (sans effet sur le coin
-natif BOSA, dont l'offre est fixée au genesis).
+**Reste (opérationnel, non-code) :** les 13 adresses de répartition sont renseignées ; les
+mettre sous multi-signatures et vérifier on-chain reste un chantier serveur.
+`Ownable2Step` est en place sur BRC20 (`transferOwnership` + `acceptOwnership`). Un
+**plafond de mint** applicatif n'est toujours pas dans l'implémentation de référence.
 
 **Verdict go-live du tier public : PRÊT.**

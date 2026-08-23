@@ -190,6 +190,9 @@ const ABI = [
     console.log('  À CONSIDÉRER :');
     avertissements.forEach((a) => console.log(`    ~ ${a}`));
   }
+  if (!simulationOk && !bloquants.some((b) => b.startsWith('la chaîne REJETTE'))) {
+    bloquants.push('simulation on-chain non exécutée — gouverneur illisible, ne pas envoyer.');
+  }
   if (bloquants.length) {
     console.error('\n  BLOQUANTS :');
     bloquants.forEach((b) => console.error(`    ✗ ${b}`));

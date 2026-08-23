@@ -176,7 +176,9 @@ multilingue, critères de réception — est dans **[FRONTEND.md](FRONTEND.md)**
 Les décisions structurantes du projet, avec leur justification et les points encore ouverts,
 sont consignées dans **[DECISIONS.md](DECISIONS.md)**, et l'économie du jeton dans **[TOKENOMICS.md](TOKENOMICS.md)**.
 La migration des jetons historiques est décrite dans **[docs/MIGRATION.md](docs/MIGRATION.md)**, et
-l'audit de sécurité interne et le durcissement dans **[docs/SECURITY-HARDENING.md](docs/SECURITY-HARDENING.md)**.
+La migration des jetons historiques est décrite dans **[docs/MIGRATION.md](docs/MIGRATION.md)**,
+l'audit de sécurité interne et le durcissement dans **[docs/SECURITY-HARDENING.md](docs/SECURITY-HARDENING.md)**,
+et la passe zones d'ombre du 16 août 2026 dans **[docs/AUDIT-ZONES-OMBRE.md](docs/AUDIT-ZONES-OMBRE.md)**.
 
 ---
 
@@ -208,12 +210,17 @@ La suite s'exécute contre une vraie chaîne, pas contre un simulateur.
 
 ```bash
 RPC=http://127.0.0.1:8545 node scripts/test-brc20.js
+RPC=http://127.0.0.1:8545 node scripts/test-validatorset.js
 ```
 
-Le banc couvre les métadonnées, les transferts, les autorisations, l'émission et sa **clôture
+Le banc BRC20 couvre les métadonnées, les transferts, les autorisations, l'émission et sa **clôture
 définitive** (`finishMinting`), la destruction, la **propriété en deux étapes** (`transferOwnership`
 puis `acceptOwnership`) et son **abandon** (`renounceOwnership`), et les événements — y compris tous
 les cas qui doivent échouer.
+
+Le banc du contrat système vérifie que `init()` est idempotent, que `deposit` /
+`distributeFinalityReward` ne revertent pas, et que `updateValidatorSet` refuse un appel hors
+gouverneur ou sans le validateur de genèse — sans jamais publier de rotation.
 
 ---
 

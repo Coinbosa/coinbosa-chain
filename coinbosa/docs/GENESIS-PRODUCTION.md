@@ -1,33 +1,22 @@
 # Créer les coins — procédure du genesis de production
 
-Les 700 000 000 BOSA n'existent pas encore. Ils naîtront **au bloc 0**, en une seule
-opération : le genesis inscrit l'offre et ses détenteurs, puis plus rien ne peut la changer —
-le moteur de consensus ne crée pas de monnaie.
+Les 700 000 000 BOSA naissent **au bloc 0**, en une seule opération : le genesis inscrit
+l'offre et ses détenteurs, puis plus rien ne peut la changer — le moteur de consensus ne
+crée pas de monnaie. Il n'y a **pas de deuxième essai**.
 
-Il n'y a donc **pas de deuxième essai**. Une adresse mal recopiée, une clé perdue, un poste
-oublié : la seule correction possible serait de relancer un réseau, c'est-à-dire d'abandonner
-le premier. Ce document est la marche à suivre pour que cela n'arrive pas.
-
-> **État au 6 août 2026 : NO-GO — il manque UNE seule chose, les adresses.**
+> **État dans le dépôt (figé le 7 août 2026) : genesis de production produit.**
 >
 > | | |
 > |---|---|
-> | Client compilé sur le serveur | ✅ geth 1.7.6, patch 5 s vérifié |
-> | Clé de scellage du validateur | ✅ générée **sur le serveur**, jamais sortie |
-> | Adresse du validateur | `0x3986D6b31EC55043CeaAF25f5dDEa53517CBba50` |
-> | Nœud RPC + relais `/rpc` | ✅ prêts (`30-node.sh`, Caddy) |
-> | **13 adresses de répartition** | ❌ **toutes à `0x0`** |
-> | **Gouverneur** | ❌ non désigné |
+> | Empreinte du bloc 0 | `0x8dcdadc247a98f33728cae944e20ce7c49c74b35cfba31495f85e98979018da6` |
+> | Validateur de genèse | `0x3986D6b31EC55043CeaAF25f5dDEa53517CBba50` |
+> | Gouverneur | `0x1EEf3830833d83AcD3152A511853fd04a0b4082A` (irremplaçable) |
+> | 13 adresses de répartition | renseignées dans `distribution-addresses.json` |
+> | Nombre de validateurs | **1** — ni tolérance aux pannes ni sécurité byzantine |
 >
-> Voie retenue : **portefeuille matériel**. Une phrase de récupération générée sur
-> l'appareil, dont on n'exporte que le **xpub** (clé publique, qui ne permet pas de
-> dépenser) ; `scripts/derive-treasury-addresses.js` en dérive les 13 adresses plus le
-> gouverneur. La phrase ne touche jamais un ordinateur.
->
-> Nombre de validateurs au lancement : **1**, avec passage à 4 ensuite. Conséquence à
-> assumer publiquement : le réseau n'a **ni tolérance aux pannes ni sécurité byzantine**,
-> et la clé de scellage vit sur le serveur qui sert aussi le site. C'est un choix de
-> vitesse, pas une architecture cible — il doit rester écrit noir sur blanc.
+> Ce tableau décrit ce qui est **dans le dépôt**. Il ne dit pas si le réseau public tourne,
+> ni si les 13 adresses sont déjà sous multi-signatures. La procédure ci-dessous reste
+> la référence pour toute **nouvelle** genèse ; elle ne s'applique plus à celle déjà figée.
 
 ---
 

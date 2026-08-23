@@ -174,6 +174,10 @@ hex_h=$(curl -s -X POST "https://$DOMAINE/rpc" -H 'content-type: application/jso
 
 if [ -z "${hex_h:-}" ]; then
   alerte error "RPC public muet" "eth_blockNumber sans reponse sur https://$DOMAINE/rpc"
+elif [[ ! "$hex_h" =~ ^0x[0-9a-fA-F]+$ ]]; then
+  # hex_h est interpolé ensuite dans un JSON entre guillemets bash. Sans ce filtre,
+  # un résultat hostile (nœud compromis, relais cassé) du genre 0x1$(cmd) s'exécuterait.
+  alerte error "RPC public illisible" "eth_blockNumber a renvoye une hauteur non hexadecimale"
 else
   t0=$(date +%s)
   rep=$(curl -s -X POST "https://$DOMAINE/rpc" -H 'content-type: application/json' \

@@ -88,12 +88,23 @@
       "expire_le": "2026-10-06"
     },
     {
+      "avis": "GO-2026-6099",
+      "module": "github.com/quic-go/webtransport-go",
+      "present": "v0.8.1-0.20241018022711-4ac2c9250e66",
+      "corrige_dans": "v0.11.1",
+      "classe": "épuisement mémoire, buffering des capsules WebTransport inconnues (déni de service)",
+      "pourquoi": "Même module que GO-2026-4488/4485/4483 : webtransport-go n'est sur aucun chemin Coinbosa, dépendance transitive de la pile QUIC amont. Publié après les trois premiers avis (CVE-2026-57497). La remontée à v0.11.1 tire une version récente de quic-go et change le binaire de scellage : à planifier, pas à improviser. Même condition d'exposition que GO-2026-5676 — les DEUX nœuds tournent avec --nodiscover. audit-go.js refuse désormais de déroger si ce drapeau disparaît d'un des deux scripts de déploiement.",
+      "a_reexaminer": "BLOQUANT avant d'ouvrir la découverte de pairs. Intégrer v0.11.1 avec la remontée QUIC coordonnée.",
+      "ajoute_le": "2026-08-18",
+      "expire_le": "2026-10-06"
+    },
+    {
       "avis": "GO-2026-4479",
       "module": "github.com/pion/dtls/v2",
       "present": "v2.2.12",
       "corrige_dans": "AUCUN correctif publié à ce jour pour la branche v2",
       "classe": "CRYPTOGRAPHIQUE — nonce aléatoire avec AES-GCM, risque de fuite de la clé d'authentification",
-      "pourquoi": "La plus sérieuse des huit : ce n'est PAS un déni de service mais une faiblesse cryptographique. DTLS est tiré par la pile STUN/NAT de l'amont (p2p/nat/stun.go). Elle ne concerne que des sessions DTLS réellement établies : les validateurs Coinbosa n'utilisent pas la traversée de NAT (--nodiscover, --maxpeers 0), aucune session DTLS n'est donc négociée. Aucune clé du consensus ni de trésorerie ne transite par DTLS — les clés de scellage ne touchent jamais cette pile.",
+      "pourquoi": "La plus sérieuse des huit : ce n'est PAS un déni de service mais une faiblesse cryptographique. DTLS est tiré par la pile STUN/NAT de l'amont (p2p/nat/stun.go). Elle ne concerne que des sessions DTLS réellement établies. En production le validateur tourne avec --nodiscover et --netrestrict 127.0.0.0/8 (pas --maxpeers 0 : il doit rester appariable au nœud RPC local) ; le nœud RPC tourne avec --nodiscover. Aucune session DTLS n'est donc négociée. Aucune clé du consensus ni de trésorerie ne transite par DTLS — les clés de scellage ne touchent jamais cette pile.",
       "a_reexaminer": "Aucune version corrigée en v2 : suivre la migration amont vers pion/dtls/v3. BLOQUANT si la traversée de NAT/STUN devait être activée sur un nœud.",
       "ajoute_le": "2026-08-06",
       "expire_le": "2026-10-06"

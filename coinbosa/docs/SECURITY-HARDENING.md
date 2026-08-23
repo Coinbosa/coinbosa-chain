@@ -19,7 +19,7 @@ il ne le remplace pas.
 | Sévérité | Problème | Correctif |
 |---|---|---|
 | **Haute** | **XSS stocké on-chain** dans l'explorateur : `name()` / `symbol()` d'un jeton, contrôlés par son déployeur, étaient injectés en `innerHTML` sans échappement. Un jeton dont `name()` vaut `<img src=x onerror=…>` exécutait du script chez tout visiteur ouvrant l'onglet Tokens. | Échappement HTML systématique (`esc()`) des valeurs issues de contrats, et plafonnement de leur longueur. |
-| **Moyenne** | **`updateValidatorSet` pouvait figer la chaîne** : remplacer le set par des adresses sans nœud vivant laissait le réseau sans signataire au bloc d'epoch suivant — arrêt irréversible, en une transaction. | Le contrat exige désormais que le `GOVERNOR` reste dans le set, et rejette les clés de vote en double. |
+| **Moyenne** | **`updateValidatorSet` pouvait figer la chaîne** : remplacer le set par des adresses sans nœud vivant laissait le réseau sans signataire au bloc d'epoch suivant — arrêt irréversible, en une transaction. | Le contrat exige que le **validateur de genèse** (`INITIAL_VALIDATOR`) reste dans le set, et rejette les clés de vote en double. **Cela ne garantit pas la liveness** : Parlia exige ⌊N/2⌋+1 signataires en ligne. La barrière opérable est `scripts/rotate-validators.js`. |
 | **Moyenne** | **Contrats inter-chaînes hérités** (pont, cross-chain, light client, relayers) conservaient leur bytecode ; seul le solde était purgé. | Leur code est retiré du genesis. Vérifié empiriquement : la chaîne démarre et franchit l'epoch sans eux. |
 | **Basse** | **Ports RPC divergents** (nœud sur 8595, explorateur sur 8545) : l'explorateur ne joignait jamais le nœud et basculait en silence sur des données de démonstration. | Port unifié sur 8545 partout. **Depuis, le repli sur des données de démonstration a été entièrement supprimé** : l'explorateur n'affiche plus que ce qui vient de la chaîne, et un avis explicite quand aucun nœud ne répond. L'accès passe par le relais same-origin `/rpc`. |
 | **Basse** | **Adresses de distribution en double** non détectées : deux postes partageant une adresse fusionnaient leurs soldes sans alerte. | `build-genesis.js` rejette tout doublon d'adresse. |
@@ -49,33 +49,36 @@ franchit un bloc d'epoch. C'est utile, mais il faut savoir ce qu'elle **ne** dé
 Les scripts livrés (`start-node.sh`) sont marqués **DÉVELOPPEMENT LOCAL**. La production exige
 une configuration différente.
 
-### Les clés ne vivent pas dans le nœud
+### La clé de scellage est encore dans le processus validateur
 
 En développement, le nœud déverrouille la clé de scellage dans son propre processus
-(`--unlock`, `--allow-insecure-unlock`). **En production, c'est interdit.** La clé de scellage
-doit être détenue par un **signeur distant** (Clef, web3signer) ou un HSM/KMS, hors du processus
-exposé au réseau. Aucune clé privée en clair sur le serveur.
+(`--unlock`, `--allow-insecure-unlock`). **Les scripts de production font encore la même
+chose** (`deploy/40-validator.sh`). Ce n'est pas un oubli de drapeau : le validateur n'expose
+aucun HTTP, tourne sous un utilisateur dédié, et le RPC public vit sur un autre processus
+(`deploy/30-node.sh`, sans clé). Un signeur distant (Clef, web3signer) ou un HSM reste un
+objectif — pas l'état actuel. Suivre l'ancienne phrase « en production c'est interdit »
+sans avoir branché le signeur arrêterait la production de blocs.
 
-### Le RPC est fermé
+### Le RPC public est un relais, pas un geth ouvert
 
-| Réglage | Développement | Production |
+Ce que `deploy/30-node.sh` et `deploy/10-web.sh` font réellement :
+
+| Réglage | Ce que le script pose | Pourquoi pas « le domaine réel » |
 |---|---|---|
-| `--http.api` | `eth,net,web3,parlia` | idem — **jamais `debug`**, ni `txpool` si inutile |
-| `--http.corsdomain` | origine locale | liste explicite des origines autorisées |
-| `--http.vhosts` | `127.0.0.1,localhost` | le domaine réel, jamais `*` |
-| Exposition | `127.0.0.1` | derrière un reverse-proxy TLS, avec authentification et limitation de débit |
-| Méthodes admin | — | fermées |
+| `--http.api` | `eth,net` seulement | `web3_clientVersion` donnait la version exacte du client, recoupable avec `go-vuln-allowlist.json`. `parlia` / `debug` / `txpool` absents. |
+| `--http.addr` | `127.0.0.1` | 8545 n'est pas ouvert au monde ; Caddy relaie `/rpc` en POST uniquement. |
+| `--http.vhosts` | `localhost,127.0.0.1` | Caddy pose `Host` à `{upstream_hostport}`. Mettre le nom public ici casserait ce modèle, ou forcerait à relâcher la garde anti-DNS-rebinding. |
+| `--http.corsdomain` | `https://explorer.coinbosa.com` | Liste explicite, jamais `*`. |
+| `--nodiscover` | sur **les deux** nœuds | Condition des dérogations QUIC/WebTransport/DTLS. |
+| Lots RPC | `--rpc.batch-request-limit 50`, `--rangelimit`, `--rpc.logquerylimit 20` | Un lot de 1000 (défaut geth) contournait le limiteur HTTP. |
 
 ### Séparation des rôles
 
-Aujourd'hui, une clé unique peut à la fois **sceller les blocs**, **gouverner la liste des
-validateurs** (`updateValidatorSet`) et **retirer les fonds** (`sweepSurplus`). C'est le risque
-numéro un du dossier. En production, ces rôles doivent être séparés :
+En développement, une même clé peut sceller et gouverner. **En production, ces rôles sont déjà séparés dans le genesis** (`INITIAL_VALIDATOR` ≠ `GOVERNOR`, voir `genesis-reference.json`). Ce qui reste à durcir :
 
-- **`GOVERNOR`** = un portefeuille **multi-signatures** (Safe) avec délai (timelock), distinct de
-  la clé de scellage et de la trésorerie.
-- **Clé de scellage** = par validateur, générée sur son serveur, jamais partagée.
-- **Trésorerie** = multi-signatures dédié.
+- **`GOVERNOR`** = un portefeuille **multi-signatures** (Safe) avec délai (timelock), distinct de la clé de scellage et de la trésorerie. Aujourd'hui c'est une adresse unique dérivée du matériel, **irremplaçable** (constante du contrat).
+- **Clé de scellage** = par validateur, générée sur son serveur, jamais partagée. Ne gouverne pas.
+- **Trésorerie** = les 13 postes de `distribution-addresses.json`, à passer sous multi-signatures.
 
 ### Le genesis de production
 
@@ -120,11 +123,14 @@ documentée (via la gouvernance, jamais par réécriture de l'historique git).
 
 Ces points relèvent du serveur et de l'exécution, pas d'un correctif de fichier :
 
-1. Séparer le `GOVERNOR`, la clé de scellage et la trésorerie sous multi-signatures et timelock.
-2. Sortir la clé de scellage du nœud RPC (signeur distant / HSM).
-3. Fermer le RPC (proxy TLS, origines explicites, `debug` retiré, limitation de débit).
-4. Passer à plusieurs validateurs indépendants.
-5. Anti-DoS : prix de gas minimal, bornes mempool.
+1. Mettre le `GOVERNOR` et la trésorerie sous multi-signatures et timelock (la séparation d'adresses gouverneur / scellage est déjà en place).
+2. Sortir la clé de scellage du nœud (signeur distant / HSM) — aujourd'hui elle reste déverrouillée dans le processus validateur, isolé du RPC.
+3. ~~Fermer le RPC~~ **Fait dans les scripts** (`eth,net`, relais Caddy, lots bornés). Reste : confirmer que le serveur public a bien été redéployé avec ces scripts.
+4. Passer à plusieurs validateurs indépendants — **sans** appeler `updateValidatorSet` à la main
+   (`rotate-validators.js` uniquement). `SlashIndicator` hérité est **incompatible** avec
+   `CoinbosaValidatorSet` (pas de `misdemeanor`/`felony`) : un slash revert silencieusement,
+   aucune sanction. C'est acceptable à N=1 ; bloquant dès N≥2.
+5. Anti-DoS : prix de gas minimal, bornes mempool. (`--rangelimit` et la limite de lots sont en place.)
 6. Marqueur d'identité réseau distinct.
-7. Supervision (hauteur de bloc, mempool, disque, accès RPC non autorisé) et plan d'incident.
+7. ~~Supervision~~ **Fait dans les scripts** (`deploy/50-monitoring.sh` : hauteur, fork, disque, TLS, lisibilité `eth_getLogs`). Reste : DSN Sentry réellement branché, et redéploiement de la sonde n°6.
 8. Audit de sécurité **externe** avant toute mise en valeur du réseau.

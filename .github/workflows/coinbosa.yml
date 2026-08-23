@@ -139,6 +139,10 @@ jobs:
         working-directory: coinbosa
         run: RPC=http://127.0.0.1:8545 node scripts/test-brc20.js
 
+      - name: Tests du contrat système (consensus)
+        working-directory: coinbosa
+        run: RPC=http://127.0.0.1:8545 node scripts/test-validatorset.js
+
       # Le bloc 200 est le premier bloc d'epoch : c'est là que le contrat système
       # est interrogé. Une régression sur CoinbosaValidatorSet fige la chaîne ici.
       - name: Franchir un bloc d'epoch
