@@ -48,11 +48,18 @@
     "$comment": "Aucune part de l'offre n'est réservée aux récompenses et aucune émission n'est créée. Sans trafic, le revenu d'un validateur est nul. Ne jamais publier de taux de rendement."
   },
   "migration": {
-    "$comment": "Le projet contrôle la totalité des 500 M de jetons Solana (consolidés sur projectWallet). Il n'y a pas de détenteurs tiers : la réserve de migration est donc nulle et le projet reçoit l'intégralité de l'offre native. Les 500 M Solana seront retirés de la circulation (non migrés) pour éviter tout double compte. Le portail reste disponible pour un éventuel détenteur résiduel (ancien contributeur), crédité depuis la réserve stratégique.",
+    "$comment": "MESURE, pas suppose — voir DOSSIER-COTATION.md section 8, remesure le 2026-09-03 sur Solana mainnet. Le portefeuille projet 5pdFbZ...edQf detient 479 990 400 unites, soit 96,00 % de l'offre de 499 999 940. Les 4,00 % restants — plus de 20 millions d'unites — sont HORS de ce portefeuille ; on ignore s'ils appartiennent a d'autres portefeuilles du projet ou a des tiers (getTokenLargestAccounts est refuse par les points d'acces publics). L'autorite de frappe ET l'autorite de gel sont ACTIVES sur 3zADMB...2Pkq, une adresse qui n'est pas le portefeuille projet : d'autres unites peuvent etre creees a tout moment. La reserve de migration reste a 0 : c'est une DECISION de l'editeur, a reexaminer si des detenteurs tiers se manifestent — elle ne repose plus sur l'affirmation qu'il n'y en a pas. Le portail reste disponible pour un detenteur residuel, credite depuis la reserve strategique.",
     "sourceChain": "solana",
     "sourceContract": "8UyvxCoVXoVaftWzp7j9yo2sGL2HnHTFDV4capenyFaf",
-    "sourceSupply": "500000000",
-    "projectHeld": "500000000",
+    "sourceSupply": "499999940.39",
+    "projectHeld": "479990400",
+    "projectHeldPct": "96.00",
+    "heldElsewhere": "20009540.39",
+    "decimals": 10,
+    "mintAuthority": "3zADMByrBhWTnQETN2gv5Gt7jhQKyyprjLCLVVnv2Pkq",
+    "freezeAuthority": "3zADMByrBhWTnQETN2gv5Gt7jhQKyyprjLCLVVnv2Pkq",
+    "authoritiesRevoked": false,
+    "measuredAt": "2026-09-07",
     "reserve": "0",
     "ratio": "1:1",
     "projectWallet": "5pdFbZdyab9jQUnC2E4x9XGmLpAFNqoF4GyjEtpfedQf"
@@ -62,15 +69,15 @@
     "amount": "700000000"
   },
   "links": {
-    "$comment": "Liens publics — réseaux sociaux, site, explorateur, livre blanc. Source de vérité ; l'explorateur (explorer/index.html, objet LINKS) et le futur site coinbosa.com les reprennent.",
+    "$comment": "Canaux officiels. Chacun a ete VERIFIE le 2026-09-04 : le lien repond, et il nous appartient. Un canal qu on ne controle pas ne se publie pas — publier un nom d utilisateur libre le legitime pour qui le prendra demain. Deux adresses ont ete retirees a ce titre : t.me/coinbosa, qui est un compte PERSONNEL et non un groupe (« You can contact @coinbosa right away »), et t.me/coinbosagroup, dont le nom n etait pas reserve. Elles etaient declarees ici comme canal officiel et canal communautaire, alors que les neuf pages publiees emploient toutes t.me/Coinbosaofficial — le vrai groupe, confirme par l editeur. Ce fichier contredisait donc le site qu il pretend alimenter. site/app.js et explorer/app.js portent leur PROPRE copie de ces liens (site statique, aucune lecture a l execution) : les trois se tiennent a la main.",
     "website": "https://coinbosa.com",
     "explorer": "https://explorer.coinbosa.com",
-    "whitepaper": "https://github.com/Coinbosa/coinbosa-chain/blob/master/coinbosa/WHITEPAPER.md",
+    "whitepaper": "https://coinbosa.com/whitepaper/",
     "github": "https://github.com/Coinbosa/coinbosa-chain",
     "facebook": "https://www.facebook.com/coinbosa",
-    "twitter": "",
-    "telegram": "https://t.me/coinbosa",
-    "telegramCommunity": "https://t.me/coinbosagroup",
+    "twitter": "https://x.com/coinbosa6476",
+    "$twitter_note": "Compte X officiel, confirme par l editeur le 2026-09-04. AVERTISSEMENT : un SECOND compte porte le nom du projet, x.com/coinbosacrypto (« Coinbosa »), et L EDITEUR EN A PERDU LES ACCES. Il n est donc PAS officiel. L organisation GitHub du projet le declare pourtant encore (api.github.com/orgs/Coinbosa -> twitter_username), ce qui designe publiquement un compte hors de notre controle : a corriger par l editeur. Jusque-la, notre propre page GitHub sert d aval a un compte qui ne nous appartient plus.",
+    "telegram": "https://t.me/Coinbosaofficial",
     "discord": ""
   },
   "entity": {

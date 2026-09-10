@@ -1,0 +1,21 @@
+{
+  "$commentaire": [
+    "Empreinte du bloc 0 du réseau de PRODUCTION Coinbosa Chain, figée au gel du genesis.",
+    "",
+    "check-genesis-hash.js compare la chaîne branchée à ces valeurs. stateRoot est la racine",
+    "de Merkle de TOUT l état initial : un seul wei ajouté à une adresse quelconque — même",
+    "inconnue — la change. Comparer cette empreinte suffit donc à détecter n importe quelle",
+    "allocation cachée, sans avoir à énumérer les comptes.",
+    "",
+    "Ces valeurs sont reproductibles : regénérer le genesis avec les mêmes adresses et le même",
+    "solc doit redonner exactement le même hash."
+  ],
+  "reseau": "Coinbosa Chain",
+  "chainId": 26262,
+  "fige_le": "2026-08-07",
+  "hash": "0x8dcdadc247a98f33728cae944e20ce7c49c74b35cfba31495f85e98979018da6",
+  "stateRoot": "0x93682eb9182a55531d47014b76a285b45d3e720a2951f9ffbdc67f52995f8c03",
+  "extraData": "0x0000000000000000000000000000000000000000000000000000000000000000013986d6b31ec55043ceaaf25f5ddea53517cbba500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  "validateur": "0x3986D6b31EC55043CeaAF25f5dDEa53517CBba50",
+  "gouverneur": "0x1EEf3830833d83AcD3152A511853fd04a0b4082A"
+}

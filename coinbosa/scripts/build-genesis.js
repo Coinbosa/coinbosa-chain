@@ -34,6 +34,33 @@ if (!VALIDATOR || !ethers.isAddress(VALIDATOR)) {
   process.exit(1);
 }
 
+// --- Gouverneur du contrat système : distinct de la clé de scellage en production ---
+// Le gouverneur peut modifier l'ensemble des validateurs et récupérer le surplus. La clé
+// de scellage, elle, signe un bloc toutes les 5 secondes : elle vit forcément EN LIGNE sur
+// le serveur du validateur. Les confondre reviendrait à laisser la gouvernance de la chaîne
+// sur une machine exposée en permanence — la compromission d'un serveur donnerait le
+// contrôle du consensus. En production, on exige donc deux adresses différentes, et le
+// gouverneur doit être un coffre multi-signatures (idéalement derrière un délai).
+const GOVERNOR_ENV = process.env.GOVERNOR;
+if (!ALLOW_DEV) {
+  if (!GOVERNOR_ENV || !ethers.isAddress(GOVERNOR_ENV)) {
+    console.error('ERREUR : GOVERNOR manquant ou invalide.');
+    console.error('  En production, le gouverneur doit être une adresse multi-signatures, distincte du validateur :');
+    console.error('    VALIDATOR=0x… GOVERNOR=0x… node scripts/build-genesis.js');
+    process.exit(1);
+  }
+  if (GOVERNOR_ENV.toLowerCase() === VALIDATOR.toLowerCase()) {
+    console.error('ERREUR : GOVERNOR est identique au VALIDATOR.');
+    console.error('  La clé de scellage est en ligne en permanence ; lui confier la gouvernance');
+    console.error('  signifierait qu\'un serveur compromis emporte le contrôle du consensus.');
+    console.error('  Utilisez un coffre multi-signatures distinct comme gouverneur.');
+    process.exit(1);
+  }
+}
+// En développement, le validateur fait office de gouverneur : c'est ce qui permet de
+// piloter une chaîne locale avec une seule clé jetable.
+const GOVERNOR = GOVERNOR_ENV || VALIDATOR;
+
 const ZERO = '0x0000000000000000000000000000000000000000';
 const WEI = 10n ** 18n;
 const TOTAL_SUPPLY = BigInt(CONFIG.nativeCoin.totalSupply);       // 700 000 000
@@ -71,18 +98,43 @@ function addressFor(post) {
   return ethers.getAddress('0x' + ethers.id('coinbosa-dev:' + post).slice(-40));
 }
 
-// --- 1. compiler le ValidatorSet avec le gouverneur voulu ---
-const GOV = ethers.getAddress(VALIDATOR); // adresse checksummee (Solidity exige EIP-55)
-let source = fs.readFileSync(SOL, 'utf8');
-const GOV_RE = /address public constant GOVERNOR = 0x[0-9a-fA-F]{40};/;
-const srcBefore = source;
-source = source.replace(GOV_RE, `address public constant GOVERNOR = ${GOV};`);
-// Garde dure : sans confirmation du remplacement, le contrat compilerait avec le
-// GOVERNOR par defaut (0x...0001) — gouverneur silencieusement faux dans le bytecode.
-if (source === srcBefore || !source.includes(`address public constant GOVERNOR = ${GOV};`)) {
-  console.error('ERREUR : injection du GOVERNOR echouee — motif introuvable dans CoinbosaValidatorSet.sol.');
+// Garde fail-closed : le bytecode du contrat système 0x…1000 — donc le HASH du bloc 0,
+// donc l'identité de la chaîne — dépend de la version EXACTE de solc. On refuse toute autre
+// version que celle épinglée (même garde que compile.js).
+const SOLC_EXPECTED = '0.8.26';
+if (!solc.version().startsWith(SOLC_EXPECTED)) {
+  console.error(`ERREUR : solc ${solc.version()} détecté, ${SOLC_EXPECTED} attendu. Fige la version (npm ci) et recommence.`);
   process.exit(1);
 }
+
+// --- 1. compiler le ValidatorSet avec le gouverneur et le validateur voulus ---
+// Deux adresses DISTINCTES sont injectees :
+//   GOVERNOR          — gouvernance seule, ne scelle aucun bloc, peut vivre hors ligne ;
+//   INITIAL_VALIDATOR — le validateur de genese, dont la cle de scellage est detenue par
+//                       le noeud mineur. C'est LUI que le contrat renvoie comme validateur
+//                       et qu'il exige de conserver dans le set (garde anti-arret), et il
+//                       doit etre identique au validateur inscrit dans l'extraData.
+// Les confondre — comme le faisait la version precedente — revient soit a poser la
+// gouvernance sur une cle chaude, soit a annoncer au consensus un validateur dont
+// personne ne detient la cle : dans ce second cas la chaine s'arrete au bloc d'epoch.
+const GOV = ethers.getAddress(GOVERNOR);      // adresses checksummees (Solidity exige EIP-55)
+const VAL = ethers.getAddress(VALIDATOR);
+let source = fs.readFileSync(SOL, 'utf8');
+
+function injecter(nom, valeur) {
+  const motif = new RegExp(`address public constant ${nom} = 0x[0-9a-fA-F]{40};`);
+  const avant = source;
+  source = source.replace(motif, `address public constant ${nom} = ${valeur};`);
+  // Garde dure : sans confirmation du remplacement, le contrat compilerait avec la
+  // valeur par defaut — adresse silencieusement fausse, figee dans le bytecode du
+  // bloc 0, donc dans l'identite de la chaine.
+  if (source === avant || !source.includes(`address public constant ${nom} = ${valeur};`)) {
+    console.error(`ERREUR : injection de ${nom} echouee — motif introuvable dans CoinbosaValidatorSet.sol.`);
+    process.exit(1);
+  }
+}
+injecter('GOVERNOR', GOV);
+injecter('INITIAL_VALIDATOR', VAL);
 
 const out = JSON.parse(solc.compile(JSON.stringify({
   language: 'Solidity',
@@ -172,12 +224,39 @@ g.extraData = '0x' + '00'.repeat(32) + '01' + VALIDATOR.slice(2).toLowerCase() +
 // start-node.sh est lui volontairement DEV-only : il sert justement ce genesis de dev.
 if (ALLOW_DEV) g.coinbosaDev = true;
 
+// --- chainId de developpement : DISTINCT de la production, et ce n'est pas cosmetique ---
+// Le networkId ne suffit pas. Il separe les reseaux P2P, mais il n'entre dans RIEN de ce
+// qui est signe. Le chainId, lui, y entre : le precompile de double signature (0x68)
+// calcule le hash de scellement A PARTIR DU ChainId (core/vm/contracts.go), et c'est ce
+// hash qu'un validateur signe. Deux chaines qui partagent un chainId partagent donc leurs
+// signatures, quel que soit leur networkId.
+// CE QU'ON EVITE : la chaine de developpement est demarree a chaque poussee par la CI,
+// AVEC un validateur qui mine. Une equivocation authentique commise la-bas — deux entetes
+// differents scelles a la meme hauteur par la meme cle — constituerait, tant que les deux
+// chainId coincident, une preuve parfaitement VALIDE en PRODUCTION. Et
+// signalerDoubleSignature ne prend pas une ponction : elle met l'enjeu du signataire A
+// ZERO. Le contrat construit desormais son enveloppe lui-meme avec block.chainid ; ce
+// correctif ne tient sa promesse que si les deux chaines portent des chainId differents.
+// C'est ici que cela se decide.
+// La production garde 26262 — valeur de genesis-base.json et de coinbosa.config.json,
+// enregistree au registre public des chainId au nom de Coinbosa Chain. 262620 y est libre.
+// Le { ...g.config } produit une COPIE : l'objet lu depuis genesis-base.json n'est jamais
+// mute, et la production se regenere octet pour octet a l'identique.
+const CHAIN_ID_DEV = 262620;
+if (ALLOW_DEV) g.config = { ...g.config, chainId: CHAIN_ID_DEV };
+
 fs.writeFileSync(OUT, JSON.stringify(g, null, 1));
 fs.writeFileSync(path.join(ROOT, 'genesis', 'CoinbosaValidatorSet.abi.json'), JSON.stringify(contract.abi, null, 2));
 
 const extraLen = (g.extraData.length - 2) / 2;
 console.log('solc              :', solc.version().split('+')[0]);
-console.log('gouverneur        :', VALIDATOR);
+console.log('chainId           :', g.config.chainId, ALLOW_DEV
+  ? '(developpement — isole de la production 26262 : le chainId entre dans ce qui est signe)'
+  : '(PRODUCTION)');
+console.log('validateur        :', ethers.getAddress(VALIDATOR), '(clé de scellage, en ligne)');
+console.log('gouverneur        :', GOV, GOV.toLowerCase() === VALIDATOR.toLowerCase()
+  ? '⚠  IDENTIQUE au validateur — développement uniquement'
+  : '(distinct du validateur)');
 console.log('code 0x…1000      :', oldSize, '->', (runtime.length - 2) / 2, 'octets');
 console.log('extraData         :', extraLen, 'octets', extraLen === 166 ? '(conforme post-Luban)' : '(INATTENDU)');
 console.log('solde hérité purgé:', (purged / WEI).toLocaleString('fr-FR'), 'coins (dont le pont 0x…1004)');

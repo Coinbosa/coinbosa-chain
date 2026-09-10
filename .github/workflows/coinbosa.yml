@@ -4,13 +4,27 @@ name: Coinbosa
 # standard BRC20 se comporte comme spécifié. Les tests tournent contre un nœud
 # Coinbosa lancé pour l'occasion — pas contre un simulateur.
 
+# Les chemins surveillés incluent tout ce qui change le BINAIRE produit, pas seulement le
+# code Coinbosa : la chaîne d'outils et les dépendances (go.mod / go.sum) et la chaîne de
+# compilation (Makefile, build/) en font partie. Sans cela, un changement de compilateur
+# — qui modifie pourtant le binaire des validateurs — passait sans qu'aucun test de chaîne
+# ne tourne : temps de bloc, franchissement d'epoch et banc BRC20 restaient non vérifiés.
 on:
   push:
     branches: [master, main, 'coinbosa-**']
-    paths: ['coinbosa/**', 'consensus/parlia/**', '.github/workflows/coinbosa.yml']
+    paths: ['coinbosa/**', 'consensus/parlia/**', 'go.mod', 'go.sum', 'Makefile', 'build/**', '.github/workflows/coinbosa.yml']
   pull_request:
-    paths: ['coinbosa/**', 'consensus/parlia/**', '.github/workflows/coinbosa.yml']
+    paths: ['coinbosa/**', 'consensus/parlia/**', 'go.mod', 'go.sum', 'Makefile', 'build/**', '.github/workflows/coinbosa.yml']
   workflow_dispatch:
+
+  # L'argent ne bouge pas au rythme des commits. Le 5 septembre 2026, un transfert
+  # de 100 BOSA depuis le poste `equipe` est resté deux jours sans que personne le
+  # voie, pendant que le dossier de cotation continuait d'annoncer « une seule
+  # transaction dans l'histoire de la chaîne ». Rien n'était volé — mais rien ne
+  # regardait. Cet horaire fait tourner l'audit d'argent chaque jour contre la
+  # production, qu'on ait poussé du code ou non.
+  schedule:
+    - cron: '17 5 * * *'
 
 jobs:
   chaine-et-contrats:
@@ -20,6 +34,56 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # L'historique complet est requis : le controle ci-dessous compare les
+          # commits pousses a leur base, ce qu'un checkout superficiel interdit.
+          fetch-depth: 0
+
+      # --- aucune signature d'outil dans les messages de commit ---
+      # Un auditeur externe a ouvert ce depot et y a lu, dans les messages de commit
+      # de la branche par defaut, la signature de l'outil qui les avait rediges. Le
+      # depot doit montrer le travail de l'equipe, et un commit n'a qu'un auteur : la
+      # personne qui en repond. La regle existait dans AGENTS.md ; rien ne la faisait
+      # respecter, et 21 commits sont passes.
+      - name: Aucune signature d'outil dans les commits
+        run: |
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+          fi
+          echo "Controle des commits $base..HEAD"
+          # -i  : la casse ne doit pas servir de contournement.
+          # ^   : ANCRE EN DEBUT DE LIGNE, et c'est essentiel. Un pied de page git
+          #       commence toujours une ligne. Sans l'ancre, la barriere s'arretait
+          #       sur un commit qui se CONTENTAIT de citer la regle en prose — elle
+          #       a commence par se bloquer elle-meme. Une barriere qui punit le fait
+          #       d'en parler est une barriere qu'on finit par desactiver.
+          fautifs=$(git log --format='%H %s%n%b' "$base..HEAD" \
+            | grep -iE '^[[:space:]]*(co-authored-by:[[:space:]]*.*(claude|cursor|copilot|codex|anthropic|openai|noreply@anthropic|cursoragent@)|(.{0,4})?generated with .*(claude|cursor|copilot|codex))' \
+            || true)
+          if [ -n "$fautifs" ]; then
+            echo "::error::Un message de commit porte la signature d'un outil."
+            echo "$fautifs"
+            echo ""
+            echo "Retire le pied de page du message, puis reecris le commit :"
+            echo "  git commit --amend     (dernier commit)"
+            echo "  git rebase -i <base>   (plusieurs commits)"
+            exit 1
+          fi
+          echo "Aucune signature d'outil."
+
+      # --- cohérence du site vitrine ---
+      # Placé avant toute compilation : ne dépend ni de Go ni de Node, coûte deux
+      # secondes, et échoue vite. Le site est fait de cinq fichiers HTML qui
+      # recopient le même en-tête et le même pied ; sans ce contrôle, une entrée de
+      # menu ajoutée sur quatre pages sur cinq passe inaperçue jusqu'en production.
+      # Le contrôle couvre aussi ce qu'un relecteur ne voit pas : un canonical
+      # dupliqué, un gestionnaire d'événement inline que la CSP tuerait
+      # silencieusement, un saut de niveau de titre, et une ressource modifiée dont
+      # l'empreinte de cache n'a pas été recalculée — auquel cas les visiteurs déjà
+      # venus garderaient l'ancienne version pendant un an.
+      - name: Cohérence des pages du site
+        run: python3 coinbosa/site/coque.py --verifier
 
       - uses: actions/setup-go@v5
         with:
@@ -37,6 +101,16 @@ jobs:
             || { echo "::error::le patch 5 s est absent de consensus/parlia/parlia.go"; exit 1; }
           echo "patch 5 s présent"
 
+      # --- la propriété la plus dangereuse du réseau, vérifiée à chaque push ---
+      # Passer de 1 à 2 validateurs alors qu'un seul nœud scelle ARRÊTE la chaîne au
+      # bloc d'epoch suivant, silencieusement, et de façon irréversible : plus aucun
+      # bloc n'étant produit, aucune transaction corrective ne peut être minée.
+      # Le test de reproduction existait au dépôt mais n'était exécuté par AUCUN
+      # workflow de cette branche — la garantie la plus critique du projet reposait
+      # donc sur un test que personne ne lançait.
+      - name: Test d'arrêt de chaîne (ajout d'un validateur)
+        run: go test ./consensus/parlia -run TestCoinbosa -count=1 -v
+
       - name: Compiler le client Coinbosa
         run: make geth
 
@@ -44,9 +118,55 @@ jobs:
         working-directory: coinbosa
         run: npm ci --no-audit --no-fund
 
+      # Barrière bloquante : toute vulnérabilité npm non explicitement dérogée
+      # (avec preuve de non-atteignabilité ET date d'expiration) fait échouer la CI.
+      - name: Auditer les dépendances npm
+        working-directory: coinbosa
+        run: node scripts/audit-deps.js
+
       - name: Compiler les contrats
         working-directory: coinbosa
         run: node scripts/compile.js
+
+      # Le jeu de validateurs ne tient debout que si N <= 2q-1, ou q est le nombre
+      # de membres qu'on a VU sceller. Depasser cette borne fait passer le quorum
+      # Parlia au-dessus du nombre de producteurs reels et ARRETE LA CHAINE, sans
+      # retour possible : une chaine qui ne produit plus ne peut plus recevoir la
+      # transaction qui la reparerait. Cette suite tient la garde de _construire.
+      # Sa valeur a ete etablie par mutation : retirer la garde fait tomber 42
+      # tests, inverser l'ordre du test de debordement en fait tomber d'autres.
+      # Elle demarre son propre noeud sur le port 8599, elle n'entre donc pas en
+      # conflit avec celui des etapes suivantes.
+      - name: Selection des validateurs (invariant N <= 2q-1)
+        working-directory: coinbosa
+        env:
+          GETH: ${{ github.workspace }}/build/bin/geth
+        run: node scripts/test-selection-validateurs.js
+
+      # Le precompile 0x68 calcule le hash de scellement avec le ChainId CONTENU
+      # DANS LA PREUVE, jamais avec celui de la chaine qui execute. Passer le blob
+      # de l appelant tel quel rendait donc valide ici une equivocation commise
+      # sur une AUTRE chaine Parlia — et signalerDoubleSignature confisque la
+      # TOTALITE de l enjeu. Le contrat construit desormais l enveloppe lui-meme
+      # avec block.chainid. Ce banc verifie les deux sens : preuve etrangere
+      # refusee, preuve locale toujours sanctionnee.
+      - name: Double signature (rejeu inter-chaines)
+        working-directory: coinbosa
+        env:
+          GETH: ${{ github.workspace }}/build/bin/geth
+        run: node scripts/test-double-signature.js
+
+      # mintingFinished() est la fonction qu une place d echange interroge pour
+      # confirmer qu un jeton a une offre fixe. Il y a DEUX facons de clore
+      # l emission : poser le drapeau, ou abandonner la propriete — mint() etant
+      # onlyOwner, un proprietaire nul la ferme aussi surement. Ne rapporter que
+      # le drapeau sous-declarait la garantie sur le standard dont herite CHAQUE
+      # jeton de la chaine. Le banc le prouve par mutation.
+      - name: BRC20 — cloture de l emission
+        working-directory: coinbosa
+        env:
+          GETH: ${{ github.workspace }}/build/bin/geth
+        run: node scripts/test-brc20-emission.js
 
       # --- genesis et démarrage ---
       - name: Générer le validateur et le genesis
@@ -58,9 +178,11 @@ jobs:
           echo "VALIDATOR=$VALIDATOR" >> $GITHUB_ENV
           echo "validateur : $VALIDATOR"
           # ALLOW_DEV : la CI vérifie la mécanique, pas la production. Les adresses de
-          # distribution restent des placeholders déterministes non dépensables.
+          # distribution restent des placeholders déterministes non dépensables, et le
+          # genesis produit est écrit sur un chemin DISTINCT (genesis-coinbosa-dev.json)
+          # avec le marqueur coinbosaDev — il ne peut pas être confondu avec la production.
           VALIDATOR=$VALIDATOR ALLOW_DEV=1 node scripts/build-genesis.js
-          ../build/bin/geth init --datadir node1 genesis/genesis-coinbosa.json
+          ../build/bin/geth init --datadir node1 genesis/genesis-coinbosa-dev.json
 
       - name: Démarrer le nœud
         working-directory: coinbosa
@@ -86,11 +208,32 @@ jobs:
 
       - name: Vérifier l'offre native (700 M, pont purgé)
         working-directory: coinbosa
-        run: RPC=http://127.0.0.1:8545 node scripts/check-supply.js
+        # Contrôle mécanique sur le genesis de DÉV (ALLOW_DEV_SUPPLY=1, explicite et bruyant).
+        # La porte de production reste stricte : sans ce flag, un genesis coinbosaDev est refusé.
+        run: GENESIS=genesis/genesis-coinbosa-dev.json ALLOW_DEV_SUPPLY=1 RPC=http://127.0.0.1:8545 node scripts/check-supply.js
+
+      # Le stateRoot du bloc 0 engage TOUT l'état initial : le comparer à une empreinte
+      # figée détecte n'importe quelle allocation cachée. En CI le genesis est régénéré à
+      # chaque run (validateur jeté), donc l'empreinte varie : on vérifie ici que le
+      # contrôle s'exécute et on affiche les valeurs. La comparaison stricte s'applique
+      # à la production, où l'empreinte est figée dans genesis-reference.json.
+      - name: Empreinte du bloc 0 (anti-allocation cachée)
+        working-directory: coinbosa
+        run: ALLOW_DEV_HASH=1 RPC=http://127.0.0.1:8545 node scripts/check-genesis-hash.js
 
       - name: Tests du standard BRC20
         working-directory: coinbosa
         run: RPC=http://127.0.0.1:8545 node scripts/test-brc20.js
+
+      # Le contrat systeme 0x...1000 est fige dans le genesis : son bytecode ne se
+      # corrige plus. Il n avait pourtant AUCUN banc en dehors du franchissement
+      # d epoch. Celui-ci verifie que l initialisation est idempotente, que
+      # deposit et reward ne revertent pas, et que la rotation est refusee hors
+      # gouverneur comme sans le validateur de genese — les deux verrous dont
+      # depend la vivacite de la chaine.
+      - name: Contrat systeme (CoinbosaValidatorSet)
+        working-directory: coinbosa
+        run: RPC=http://127.0.0.1:8545 node scripts/test-validatorset.js
 
       # Le bloc 200 est le premier bloc d'epoch : c'est là que le contrat système
       # est interrogé. Une régression sur CoinbosaValidatorSet fige la chaîne ici.
@@ -102,3 +245,35 @@ jobs:
         if: failure()
         working-directory: coinbosa
         run: tail -80 node.log
+
+  audit-argent:
+    name: Audit de l'argent (production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Ce job n'a besoin ni du binaire, ni d'un noeud local : il interroge la chaine
+    # PUBLIQUE et la compare au genesis publie dans ce depot. Il ne detient aucun
+    # secret et n'ecrit jamais sur la chaine.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Dependances
+        working-directory: coinbosa
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      # Cinq invariants : identite du bloc 0, somme du genesis, conservation de
+      # l'offre, comptabilite du contrat systeme, et mouvements de tresorerie
+      # declares. Un seul qui casse fait echouer ce job.
+      - name: Les cinq invariants d'argent
+        working-directory: coinbosa
+        run: RPC=https://explorer.coinbosa.com/rpc node scripts/audit-argent.js
+
+      # Si l'audit echoue, la sortie machine aide a comprendre quoi sans relire
+      # tout le journal.
+      - name: Detail en cas d'echec
+        if: failure()
+        working-directory: coinbosa
+        run: RPC=https://explorer.coinbosa.com/rpc node scripts/audit-argent.js --json || true

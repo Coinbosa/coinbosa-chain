@@ -42,6 +42,10 @@ install -d -o caddy -g caddy /var/www/coinbosa/site
 install -d -o caddy -g caddy /var/www/coinbosa/explorer
 install -d -o caddy -g caddy /var/www/coinbosa/whitepaper
 
+# Journal d'accès : indispensable pour la forensique ET comme source de la prison
+# fail2ban HTTP (21-fail2ban-web.sh). Sans journal, aucun bannissement possible.
+install -d -o caddy -g caddy -m 0750 /var/log/caddy
+
 # page d'attente tant que les vrais fichiers ne sont pas poussés
 for d in site explorer whitepaper; do
   if [ ! -f "/var/www/coinbosa/$d/index.html" ]; then
@@ -66,18 +70,71 @@ cat > /etc/caddy/Caddyfile <<EOF
     }
 }
 
+# --- www redirige vers l'apex ---
+# www et l'apex servaient tous deux le site en 200. Deux URL canoniques pour un
+# même contenu divisent le référencement et doublent ce qu'il faut invalider en
+# cache. L'apex fait foi ; www redirige de façon permanente, chemin préservé.
+www.$SITE_DOMAIN {
+    redir https://$SITE_DOMAIN{uri} permanent
+}
+
 # --- Site vitrine + livre blanc ---
-$SITE_DOMAIN, www.$SITE_DOMAIN {
+$SITE_DOMAIN {
     encode gzip zstd
+
+    log {
+        output file /var/log/caddy/site-access.log {
+            roll_size 50MiB
+            roll_keep 10
+        }
+        format json
+    }
+
+    # Les ressources partagées portent une empreinte de leur contenu dans l'URL
+    # (?v=…), posée par coinbosa/site/coque.py. L'URL change dès que le contenu
+    # change : un cache d'un an ne peut donc PAS servir une version périmée.
+    # Sans cette empreinte, le même cache long serait un piège — c'est elle qui
+    # le rend sûr, et la CI vérifie qu'elle suit bien le contenu.
+    @versionnee query v=*
+    @image      path *.jpg *.jpeg *.png *.ico *.svg *.webp
+    @page       path / *.html
+    @volatil    path /version.json /sitemap.xml /robots.txt
+
+    # Sonde de vivacité : savoir de l'extérieur que le serveur web répond, sans
+    # dépendre du rendu d'une page ni d'un accès à la machine.
+    handle /health {
+        header Cache-Control "no-store"
+        respond "ok" 200
+    }
 
     handle_path /whitepaper* {
         root * /var/www/coinbosa/whitepaper
+        header @versionnee Cache-Control "public, max-age=31536000, immutable"
+        header @image      Cache-Control "public, max-age=2592000"
+        header @page       Cache-Control "public, max-age=0, must-revalidate"
         file_server
     }
 
     handle {
         root * /var/www/coinbosa/site
+        header @versionnee Cache-Control "public, max-age=31536000, immutable"
+        header @image      Cache-Control "public, max-age=2592000"
+        header @page       Cache-Control "public, max-age=0, must-revalidate"
+        header @volatil    Cache-Control "no-cache"
         file_server
+    }
+
+    # Idem : une 404 doit porter les memes protections et ne rien divulguer.
+    handle_errors {
+        header {
+            Strict-Transport-Security "max-age=31536000; includeSubDomains"
+            X-Content-Type-Options    "nosniff"
+            X-Frame-Options           "DENY"
+            Referrer-Policy           "strict-origin-when-cross-origin"
+            Content-Security-Policy   "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+            -Server
+        }
+        respond "{err.status_code}" {err.status_code}
     }
 
     header {
@@ -85,7 +142,14 @@ $SITE_DOMAIN, www.$SITE_DOMAIN {
         X-Content-Type-Options    "nosniff"
         X-Frame-Options           "DENY"
         Referrer-Policy           "strict-origin-when-cross-origin"
-        Content-Security-Policy   "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests"
+        # script-src SANS 'unsafe-inline' : tout le JavaScript est servi depuis des
+        # fichiers .js de même origine, et les gestionnaires onclick ont été remplacés
+        # par de la délégation d'événements. C'est ce qui empêche une injection HTML de
+        # devenir une exécution de code.
+        # style-src garde 'unsafe-inline' : les pages utilisent encore des attributs
+        # style="…" (55 au total). Résiduel connu, à traiter en convertissant ces
+        # attributs en classes — vecteur CSS uniquement, pas d'exécution de script.
+        Content-Security-Policy   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests"
         Permissions-Policy        "accelerometer=(), autoplay=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), usb=(), interest-cohort=()"
         -Server
     }
@@ -94,15 +158,116 @@ $SITE_DOMAIN, www.$SITE_DOMAIN {
 # --- Explorateur ---
 $EXPLORER_DOMAIN {
     encode gzip zstd
-    root * /var/www/coinbosa/explorer
-    file_server
+
+    log {
+        output file /var/log/caddy/explorer-access.log {
+            roll_size 50MiB
+            roll_keep 10
+        }
+        format json
+    }
+
+    # --- Relais JSON-RPC en MÊME ORIGINE ---
+    # L'explorateur appelle https://$EXPLORER_DOMAIN/rpc : même schéma, même hôte, même
+    # port (443). C'est ce qui permet de garder la CSP stricte (connect-src 'self') ET
+    # le port 8545 du nœud FERMÉ au pare-feu — le nœud n'est jamais exposé directement.
+    # Seul POST est relayé, avec un corps borné (une requête JSON-RPC légitime est petite).
+    @rpc_post {
+        path /rpc
+        method POST
+    }
+    handle @rpc_post {
+        # geth sert son API JSON-RPC à la RACINE (/), pas sur /rpc. Sans cette réécriture,
+        # Caddy lui transmet le chemin /rpc tel quel et geth répond 404 : le relais semble
+        # branché (il l'est) mais ne renvoie jamais de résultat.
+        rewrite * /
+        request_body {
+            max_size 32KB
+        }
+        reverse_proxy 127.0.0.1:8545 {
+            # PLAFOND DE TRAVAIL SIMULTANÉ AU NŒUD.
+            # Compter les requêtes ne suffit pas : mesuré sur 11 536 requêtes /rpc
+            # réelles, la médiane coûte 1,09 ms mais le p99,9 coûte 2,13 s — un
+            # facteur 2000. Un plafond « en nombre de requêtes » laisse donc passer
+            # une charge processeur qui varie de trois ordres de grandeur, alors que
+            # le validateur partage les 4 cœurs de cette machine : c'est par là qu'un
+            # abus arrête la production de blocs.
+            # max_conns_per_host borne le nombre de requêtes SIMULTANÉES atteignant
+            # geth. Au-delà, Caddy fait ATTENDRE — il ne refuse pas : une pointe
+            # légitime est servie plus lentement, elle n'est pas perdue.
+            # Dimensionnement (loi de Little) : à la pointe mesurée, 27,7 req/s pour
+            # une durée moyenne de 7,03 ms, la simultanéité réelle valait 0,195.
+            # 24 laisse donc deux ordres de grandeur de marge, tout en bornant le
+            # pire cas — les appels à 2,13 s — à 24 en parallèle au lieu d'aucune limite.
+            transport http {
+                max_conns_per_host 24
+                dial_timeout 2s
+                # Le plus long appel observé dure 5,83 s (geth s'arrête de lui-même à
+                # --rpc.evmtimeout, 5 s par défaut). 15 s = 2,5 fois ce maximum : la
+                # marge est réelle, et une requête bloquée finit par rendre sa place.
+                response_header_timeout 15s
+            }
+            # geth vérifie l'en-tête Host (--http.vhosts) pour se protéger du
+            # « DNS rebinding ». On garde cette protection stricte côté nœud et c'est
+            # Caddy qui pose le Host attendu ; sans cela geth répond « invalid host
+            # specified ». Le nœud n'accepte donc toujours que des requêtes venant
+            # de la boucle locale, quel que soit le domaine appelé de l'extérieur.
+            header_up Host {upstream_hostport}
+        }
+    }
+    # Toute autre méthode sur /rpc (GET, OPTIONS, HEAD…) est refusée.
+    handle /rpc* {
+        respond "method not allowed" 405
+    }
+
+    # Les portefeuilles pointent vers /tx/<hash>, /block/<n>, /address/<adr>.
+    # L'explorateur est une page unique : ces chemins ne correspondent à aucun
+    # fichier et renvoyaient donc 404 — y compris pour les liens « voir sur
+    # l'explorateur » que MetaMask produira une fois la chaîne référencée.
+    # On les réécrit vers index.html ; app.js relit le chemin et lance la
+    # recherche. Le motif est BORNÉ aux trois préfixes attendus : tout autre
+    # chemin inexistant continue de renvoyer une vraie 404, plutôt que de servir
+    # la page d'accueil à des URL fantaisistes.
+    @routes path_regexp routes ^/(tx|block|blocs?|address|adresse)/[^/]+/?$
+    handle @routes {
+        rewrite * /index.html
+        root * /var/www/coinbosa/explorer
+        file_server
+    }
+
+    handle {
+        root * /var/www/coinbosa/explorer
+        file_server
+    }
+
+    # Les reponses d'erreur sortaient SANS aucun en-tete de securite et en annoncant
+    # « server: Caddy ». Une page 404 est une reponse comme une autre : elle doit porter
+    # les memes protections et ne rien dire de l'infrastructure.
+    handle_errors {
+        header {
+            Strict-Transport-Security "max-age=31536000; includeSubDomains"
+            X-Content-Type-Options    "nosniff"
+            X-Frame-Options           "DENY"
+            Referrer-Policy           "strict-origin-when-cross-origin"
+            Content-Security-Policy   "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+            -Server
+        }
+        respond "{err.status_code}" {err.status_code}
+    }
 
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
         X-Content-Type-Options    "nosniff"
         X-Frame-Options           "DENY"
         Referrer-Policy           "strict-origin-when-cross-origin"
-        Content-Security-Policy   "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests"
+        # script-src SANS 'unsafe-inline' : tout le JavaScript est servi depuis des
+        # fichiers .js de même origine, et les gestionnaires onclick ont été remplacés
+        # par de la délégation d'événements. C'est ce qui empêche une injection HTML de
+        # devenir une exécution de code.
+        # style-src garde 'unsafe-inline' : les pages utilisent encore des attributs
+        # style="…" (55 au total). Résiduel connu, à traiter en convertissant ces
+        # attributs en classes — vecteur CSS uniquement, pas d'exécution de script.
+        Content-Security-Policy   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests"
         Permissions-Policy        "accelerometer=(), autoplay=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), usb=(), interest-cohort=()"
         -Server
     }
@@ -112,9 +277,27 @@ EOF
 echo "==> Validation de la configuration"
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
+# IMPORTANT : `caddy validate` s'exécute ici en ROOT et crée les fichiers de journal
+# au passage, donc en root:root. Caddy, lui, tourne sous l'utilisateur `caddy` : sans
+# cette reprise de propriété, il échoue au démarrage sur « permission denied » et le
+# site tombe. On la fait APRÈS la validation, juste avant le rechargement.
+chown -R caddy:caddy /var/log/caddy
+chmod 0750 /var/log/caddy
+chmod 0640 /var/log/caddy/*.log 2>/dev/null || true
+
 echo "==> Rechargement de Caddy"
 systemctl enable caddy
 systemctl reload caddy 2>/dev/null || systemctl restart caddy
+
+# Garde : un rechargement « réussi » peut laisser le service mort (config acceptée par
+# validate mais refusée au démarrage). On vérifie l'état réel plutôt que le code de retour.
+sleep 2
+if ! systemctl is-active --quiet caddy; then
+  echo "ERREUR : Caddy n'est pas actif après rechargement. Détail :" >&2
+  systemctl status caddy --no-pager 2>&1 | head -12 >&2
+  exit 1
+fi
+echo "    Caddy actif."
 
 echo ""
 echo "==> Tier web prêt."

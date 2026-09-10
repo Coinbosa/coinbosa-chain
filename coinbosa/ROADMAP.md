@@ -8,8 +8,11 @@
 
 ## Où en est le projet
 
-Le socle technique fonctionne et est vérifié de bout en bout, y compris en intégration continue
-sur une machine vierge. Ce qui manque relève désormais de l'exécution, pas de la recherche.
+Le socle technique fonctionne et a été vérifié manuellement de bout en bout (démarrage du nœud,
+5 s par bloc, franchissement d'epoch, contrats). L'intégration continue **rejoue ce banc à chaque
+push** sur une machine vierge ; son état réel se lit dans l'onglet Actions du dépôt — il n'est pas
+affirmé « vert » ici tant qu'un run n'a pas été observé vert. Ce qui manque relève désormais de
+l'exécution, pas de la recherche.
 
 | | État |
 |---|---|
@@ -17,9 +20,9 @@ sur une machine vierge. Ce qui manque relève désormais de l'exécution, pas de
 | Chaîne souveraine, chainId 26262 | fait |
 | Franchissement des blocs d'epoch | fait, vérifié aux blocs 200, 400, 600, 800 |
 | Contrat système sur mesure | fait |
-| Standard de jeton BRC20 | fait, 26 tests sur 26 |
+| Standard de jeton BRC20 | fait, banc complet (propriété en deux étapes et clôture d'émission incluses) |
 | Explorateur multilingue | fait, sans indexation |
-| Intégration continue | verte, de bout en bout |
+| Intégration continue | rejoue le banc (nœud, 5 s, BRC20, epoch) à chaque push — état dans l'onglet Actions |
 | Genesis : 700 M répartis, pont purgé | fait, vérifié on-chain |
 | Mise de l'offre sous multi-signatures | à faire — bloquant |
 | Couche d'enjeu (staking, sanctions) | à faire |
@@ -36,10 +39,10 @@ La chaîne sert des produits, elle n'est pas une fin en soi.
 |---|---|---|
 | **Coinbosa Academy** | école de formation — forex, actions, puis crypto | en production |
 | **NextFuture** | place d'échange crypto — marché au comptant et contrats à terme | en construction |
-| **Coinbosa Card** | carte crypto prépayée et virtuelle, dépôts en crypto, dépense à l'international | à venir |
-| **bite-fast** | place d'échange crypto externe | existante |
+| **Coinbosa Card** | carte adossée à un prestataire agréé, dépense depuis le portefeuille | à venir |
 | **Neobanq** | plateforme bancaire | existante |
 | **Coinbosa VPN** | service d'abonnement | en cours |
+| **BOSA Omni AI** | atelier d'IA local, multi-métiers — clés et exécution chez l'utilisateur | en construction |
 
 Aucun de ces produits n'est raccordé à la chaîne à ce jour. Chaque raccordement sera annoncé
 lorsqu'il fonctionnera, et pas avant.
@@ -146,10 +149,9 @@ six langues sans chaîne non traduite.
 
 ### Jalon 7 — L'écosystème est branché
 
-- Paiement en BOSA sur Coinbosa Academy et Coinbosa VPN
+- Paiement en BOSA sur Coinbosa Academy, Coinbosa VPN et BOSA Omni AI
 - Cotation du BOSA sur NextFuture, au comptant puis à terme
-- Coinbosa Card adossée au solde on-chain
-- Passerelle avec bite-fast
+- Coinbosa Card intégrée à un prestataire agréé, conforme au routage GIM-Switch
 
 **Le point de blocage à lever en premier**, avant tout développement : les processeurs de
 paiement et les rampes fiat ne référencent en général que les chaînes majeures. Qu'un prestataire
@@ -208,16 +210,18 @@ cd coinbosa-chain
 #    il produit des blocs de 3 s au lieu de 5 s
 make geth
 
-# 2. installer les dépendances
-cd coinbosa && npm install
+# 2. installer les dépendances (reproductible, depuis le lock)
+cd coinbosa && npm ci
 
-# 3. générer la clé du validateur, puis le genesis correspondant
+# 3. générer la clé du validateur, puis le genesis de DÉVELOPPEMENT correspondant.
+#    ALLOW_DEV=1 écrit genesis/genesis-coinbosa-dev.json (adresses synthétiques + marqueur
+#    coinbosaDev) : jamais confondu avec la production.
 ../build/bin/geth account new --datadir node1
-VALIDATOR=0xLAdresseObtenue node scripts/build-genesis.js
+VALIDATOR=0xLAdresseObtenue ALLOW_DEV=1 node scripts/build-genesis.js
 
-# 4. compiler les contrats, lancer le nœud
+# 4. compiler les contrats, lancer le nœud (start-node.sh est DEV-only, garde explicite)
 node scripts/compile.js
-./scripts/start-node.sh
+COINBOSA_DEV=1 ./scripts/start-node.sh
 ```
 
 **Prérequis** — Go 1.25 ou plus, Node 20 ou plus, environ 5 Go d'espace disque pour la
