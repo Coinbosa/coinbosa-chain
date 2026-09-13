@@ -159,9 +159,40 @@ for R in node validator; do
   # geth journalise « Unclean shutdown detected » au demarrage suivant chaque
   # arret brutal. Quatre avaient eu lieu en production sans que rien ne les
   # remonte : le fait etait dans les journaux, personne ne le lisait.
-  BRUT=$(journalctl -u "$SVC" --no-pager -o cat --since "-3 min" 2>/dev/null | grep -c "Unclean shutdown detected" || true)
-  if [ "${BRUT:-0}" -gt 0 ]; then
-    alerte error "arrets brutaux passes detectes" "$SVC : geth signale ${BRUT} arret(s) non propre(s) dans son historique"
+  # GETH REJOUE TOUT SON HISTORIQUE A CHAQUE DEMARRAGE, ET C EST LA LE PIEGE.
+  #
+  # Ce controle comptait les lignes « Unclean shutdown detected » des trois
+  # dernieres minutes. Comme le redemarrage planifie relance geth, geth y
+  # reaffiche la LISTE COMPLETE de ses arrets brutaux passes — et le compte
+  # partait en [error] vers Sentry.
+  #
+  # Mesure du 12 septembre 2026 : l alerte etait partie DIX NUITS DE SUITE avec
+  # exactement les memes chiffres, 2 pour le noeud et 4 pour le validateur. Elle
+  # ne pouvait pas changer : les quatre arrets dataient des 8 et 12 aout.
+  #
+  #     booted=08-08|20:30:43   age=1mo4d7h
+  #     booted=08-08|20:55:44   age=1mo4d7h
+  #     booted=08-09|00:47:53   age=1mo4d3h
+  #     booted=08-12|09:58:25   age=1mo18h20m
+  #
+  # Une alerte qui rejoue un fait vieux d un mois, chaque nuit, et qu aucune
+  # action ne peut resoudre, finit par etre ignoree — et le jour ou un VRAI
+  # arret brutal survient, il se noie dans les neuf precedents.
+  #
+  # On ne regarde donc plus le NOMBRE mais l AGE. geth l imprime lui-meme :
+  # un age qui ne porte ni mois, ni semaine, ni jour est de moins de 24 h.
+  RECENTS=$(journalctl -u "$SVC" --no-pager -o cat --since "-3 min" 2>/dev/null \
+            | grep "Unclean shutdown detected" \
+            | grep -oE 'age=[0-9a-z]+' \
+            | grep -vE 'age=[0-9]+(mo|w|d)' || true)
+  ANCIENS=$(journalctl -u "$SVC" --no-pager -o cat --since "-3 min" 2>/dev/null | grep -c "Unclean shutdown detected" || true)
+  if [ -n "$RECENTS" ]; then
+    n=$(printf '%s\n' "$RECENTS" | grep -c .)
+    alerte error "ARRET BRUTAL RECENT" \
+      "$SVC : ${n} arret(s) non propre(s) de MOINS DE 24 H ($(printf '%s' "$RECENTS" | tr '\n' ' ')) — sur ${ANCIENS} dans tout l historique"
+  elif [ "${ANCIENS:-0}" -gt 0 ]; then
+    # Le fait reste dans le journal, mais il ne reveille personne : il est ancien.
+    logger -t coinbosa-journal "[info] $SVC : ${ANCIENS} arret(s) brutal(aux) dans l historique, aucun de moins de 24 h"
   fi
 
   if [ "$APRES_J" -le "$AVANT_J" ]; then
